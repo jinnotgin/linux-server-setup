@@ -34,7 +34,7 @@ prompt_sudo() {
 update_system() {
   echo "Updating apt package lists and upgrading packages..."
   $SUDO apt-get update -y
-  $SUDO DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
 }
 
 configure_locale_timezone() {
@@ -50,6 +50,10 @@ ensure_user() {
 
   if id -u "$username" >/dev/null 2>&1; then
     echo "User '$username' already exists. Ensuring sudo access..."
+    read -r -p "Change password for '$username'? (y/N): " change_pw
+    if [[ "$change_pw" =~ ^[Yy]$ ]]; then
+      $SUDO passwd "$username"
+    fi
   else
     echo "Creating user '$username'..."
     $SUDO adduser --disabled-password --gecos "" "$username"

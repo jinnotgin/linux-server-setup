@@ -4,6 +4,7 @@ services:
     image: nginx:stable-alpine
     container_name: cdn-proxy
     restart: unless-stopped
+    user: "{{DOCKER_USER}}"
     ports:
       - "{{NGINX_HTTPS_PORT}}:{{NGINX_HTTPS_PORT}}"
     volumes:

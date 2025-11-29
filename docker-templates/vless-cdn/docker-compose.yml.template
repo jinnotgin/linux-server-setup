@@ -4,6 +4,7 @@ services:
     image: teddysun/xray:latest
     container_name: vless-cdn
     restart: unless-stopped
+    user: "{{DOCKER_USER}}"
     volumes:
       - {{VLESS_CDN_CONFIG_PATH}}:/etc/xray/config.json:ro
     networks:

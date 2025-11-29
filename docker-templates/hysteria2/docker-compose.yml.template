@@ -4,6 +4,7 @@ services:
     image: ghcr.io/apernet/hysteria:latest
     container_name: hysteria2
     restart: unless-stopped
+    user: "{{DOCKER_USER}}"
     ports:
       - "8443:8443/udp"
       - "8443:8443/tcp"

@@ -4,6 +4,7 @@ services:
     image: nginx:stable-alpine
     container_name: gateway-router
     restart: unless-stopped
+    user: "{{DOCKER_USER}}"
     ports:
       - "443:443"
     volumes:

@@ -12,7 +12,7 @@ TARGET_USER="$(whoami)"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/docker-templates"
-GENERATED_DIR="$SCRIPT_DIR/generated"
+GENERATED_DIR="" # set later based on TARGET_USER home
 BACKUP_DIR="/opt/portainer/backups"
 RCLONE_REMOTE="portainer_gdrive"
 COMPOSE_OUTPUTS=()
@@ -323,22 +323,12 @@ generate_vless_clients() {
   printf -v "$ids_out_var" "%s" "$(IFS=', '; echo "${ids[*]}")"
 }
 
-generate_hysteria_users() {
-  local count
-  read -r -p "How many Hysteria2 users do you want? " count
-  [[ -z "$count" ]] && count=1
-  local users=() printable=()
-  for ((i=1; i<=count; i++)); do
-    read -r -p "Username for Hysteria user $i: " uname
-    read -r -p "Password for $uname (leave blank to auto-generate): " pwd
-    if [[ -z "$pwd" ]]; then
-      pwd=$(openssl rand -hex 12)
-    fi
-    users+=("{\"name\":\"$uname\",\"password\":\"$pwd\"}")
-    printable+=("$uname/$pwd")
-  done
-  HYSTERIA_USERS="[$(IFS=,; echo "${users[*]}")]"
-  HYSTERIA_USERS_PRINT="$(IFS=', '; echo "${printable[*]}")"
+generate_hysteria_password() {
+  if command -v openssl >/dev/null 2>&1; then
+    HYSTERIA_PASSWORD=$(openssl rand -hex 12)
+  else
+    HYSTERIA_PASSWORD=$(gen_uuid | tr -d '-')
+  fi
 }
 
 generate_reality_keys() {
@@ -450,6 +440,9 @@ render_templates() {
     return
   fi
 
+  local USER_HOME
+  USER_HOME=$(eval echo "~$TARGET_USER")
+  GENERATED_DIR="$USER_HOME/generated"
   mkdir -p "$GENERATED_DIR"
   echo "Collecting domain information (supports multiple domains)..."
   collect_domains_with_roles
@@ -529,7 +522,7 @@ render_templates() {
 
     generate_vless_clients "VLESS Vision (XTLS)" "xtls-rprx-vision" VISION_CLIENTS VISION_IDS
     generate_vless_clients "VLESS XHTTP Reality" "xtls-rprx-vision" REALITY_CLIENTS REALITY_IDS
-    generate_hysteria_users
+    generate_hysteria_password
 
     read -r -p "XHTTP path (default: /somepath): " XHTTP_PATH
     XHTTP_PATH=${XHTTP_PATH:-/somepath}
@@ -597,7 +590,7 @@ render_templates() {
     MASQ=${MASQ:-https://news.ycombinator.com}
     render_template_file "$TEMPLATE_DIR/hysteria2/config.yaml.template" \
       "$GENERATED_DIR/hysteria2/config.yaml" \
-      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_USERS "$HYSTERIA_USERS" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
+      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
     render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
       "$GENERATED_DIR/hysteria2/docker-compose.yml" \
       PRIMARY_DOMAIN "$DIRECT_DOMAIN"
@@ -610,7 +603,7 @@ render_templates() {
     summary+="    Public key: $reality_pub"$'\n'
     summary+="    Short IDs: $REALITY_SHORT_INPUT"$'\n'
     summary+="    UUIDs: $REALITY_IDS"$'\n'
-    summary+="  Hysteria2 on 8443 TCP/UDP, users: $HYSTERIA_USERS_PRINT"$'\n'
+    summary+="  Hysteria2 on 8443 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
     summary+="  TLS cert/key: $tls_cert_direct | $tls_key_direct"$'\n'
   fi
 
@@ -633,6 +626,10 @@ render_templates() {
     local summary_file="$GENERATED_DIR/summary.txt"
     printf "%s\n" "$summary" > "$summary_file"
     echo "Wrote client summary to $summary_file"
+  fi
+
+  if [[ -n "${SUDO:-}" && -d "$GENERATED_DIR" ]]; then
+    $SUDO chown -R "$TARGET_USER:$TARGET_USER" "$GENERATED_DIR"
   fi
 
   echo "Templates rendered under $GENERATED_DIR. Update ports/paths as needed and run 'docker compose up -d' inside each directory."

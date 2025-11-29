@@ -4,13 +4,9 @@ tls:
   cert: {{TLS_CERT}}
   key: {{TLS_KEY}}
 
-tcpFastOpen: true
-obfs:
-  type: salamander
-  salamander:
-    password: change-me
-
-users: {{HYSTERIA_USERS}}
+auth:
+  type: password
+  password: {{HYSTERIA_PASSWORD}}
 
 masquerade:
   type: proxy

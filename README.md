@@ -45,6 +45,7 @@ See [`docs/portainer-backup.md`](docs/portainer-backup.md) for details on how th
   - **vless-direct**: `teddysun/xray` with VLESS Vision (XTLS) + VLESS XHTTP Reality, using the Direct domain cert from `/certs`.
   - **hysteria2**: single-password Hysteria2 using the Direct domain cert; masquerade target configurable.
   - **healthcheck**: tiny curl container that pings a user URL every 5 minutes (healthchecks.io-friendly).
+  - **copyparty**: file server with configurable credentials and data path; config in `~/server-stacks/copyparty/cfg`, default port 3923.
 
 After rendering, you can let the script start the generated stacks automatically (if Docker is installed), or start them yourself with `docker compose up -d` from each generated directory.
 

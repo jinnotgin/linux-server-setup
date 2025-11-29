@@ -499,9 +499,10 @@ render_templates() {
   if [[ -n "${DIRECT_DOMAIN:-}" ]]; then
     read -r -p "Generate Direct stack (Hysteria2 + Vision + XHTTP Reality) for $DIRECT_DOMAIN? (y/N): " render_direct
   fi
+  read -r -p "Generate Copyparty file server? (y/N): " render_copyparty
   read -r -p "Generate a lightweight health ping container (curl every 5 minutes)? (y/N): " render_health
 
-  if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_health" =~ ^[Yy]$ ]]; then
+  if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_health" =~ ^[Yy]$ && ! "$render_copyparty" =~ ^[Yy]$ ]]; then
     echo "No stacks selected for rendering."
     return
   fi
@@ -680,6 +681,34 @@ render_templates() {
       COMPOSE_OUTPUTS+=("$health_dir/docker-compose.yml")
       summary+=$'\n'"Healthcheck: curl $HEALTHCHECK_URL every 5 minutes"$'\n'
     fi
+  fi
+
+  # Copyparty file server
+  if [[ "$render_copyparty" =~ ^[Yy]$ ]]; then
+    local copyparty_dir="$STACK_DIR/copyparty"
+    mkdir -p "$copyparty_dir/cfg"
+    read -r -p "Copyparty username: " COPYPARTY_USER
+    read -r -p "Copyparty password (leave blank to auto-generate): " COPYPARTY_PASS
+    if [[ -z "$COPYPARTY_PASS" ]]; then
+      if command -v openssl >/dev/null 2>&1; then
+        COPYPARTY_PASS=$(openssl rand -hex 12)
+      else
+        COPYPARTY_PASS=$(gen_uuid | tr -d '-')
+      fi
+    fi
+    read -r -p "Copyparty data directory to share (default: $USER_HOME): " COPYPARTY_DATA_PATH
+    COPYPARTY_DATA_PATH=${COPYPARTY_DATA_PATH:-$USER_HOME}
+
+    render_template_file "$TEMPLATE_DIR/copyparty/copyparty.conf.template" \
+      "$copyparty_dir/cfg/copyparty.conf" \
+      COPYPARTY_USER "$COPYPARTY_USER" COPYPARTY_PASS "$COPYPARTY_PASS"
+    render_template_file "$TEMPLATE_DIR/copyparty/docker-compose.yml.template" \
+      "$copyparty_dir/docker-compose.yml" \
+      COPYPARTY_CFG_PATH "$copyparty_dir/cfg" COPYPARTY_DATA_PATH "$COPYPARTY_DATA_PATH"
+    COMPOSE_OUTPUTS+=("$copyparty_dir/docker-compose.yml")
+
+    summary+=$'\n'"Copyparty on 3923 (user: $COPYPARTY_USER / pass: $COPYPARTY_PASS)"$'\n'
+    summary+="  Data dir: $COPYPARTY_DATA_PATH"$'\n'
   fi
 
   if [[ -n "$summary" ]]; then

@@ -67,6 +67,13 @@ harden_ssh() {
   local sshd_config=/etc/ssh/sshd_config
   $SUDO cp "$sshd_config" "${sshd_config}.bak.$(date +%Y%m%d%H%M%S)"
 
+  read -r -p "SSH port to use (default: 226): " ssh_port
+  ssh_port=${ssh_port:-226}
+  if [[ ! "$ssh_port" =~ ^[0-9]+$ ]]; then
+    echo "Invalid SSH port; keeping existing." >&2
+    ssh_port=""
+  fi
+
   $SUDO sed -i -E \
     -e 's/^#?PermitRootLogin.*/PermitRootLogin no/' \
     -e 's/^#?PasswordAuthentication.*/PasswordAuthentication no/' \
@@ -77,6 +84,15 @@ harden_ssh() {
 
   if ! grep -q '^Protocol 2' "$sshd_config"; then
     echo 'Protocol 2' | $SUDO tee -a "$sshd_config" >/dev/null
+  fi
+
+  if [[ -n "$ssh_port" ]]; then
+    if grep -qE '^#?Port ' "$sshd_config"; then
+      $SUDO sed -i -E "s/^#?Port .*/Port $ssh_port/" "$sshd_config"
+    else
+      echo "Port $ssh_port" | $SUDO tee -a "$sshd_config" >/dev/null
+    fi
+    echo "SSH will listen on port $ssh_port (remember to adjust firewall)."
   fi
 
   $SUDO systemctl restart sshd
@@ -120,7 +136,27 @@ install_portainer() {
 configure_rclone() {
   echo "Ensuring rclone is installed..."
   $SUDO apt-get install -y rclone
-  read -r -p "Provide path to a Google Drive service account JSON for automated backups (leave blank to skip): " sa_path
+  local user_home
+  user_home=$(eval echo "~$TARGET_USER")
+
+  echo "You can paste a Google Drive service account JSON now. It will be saved under $user_home/service-account.json with $TARGET_USER ownership."
+  read -r -p "Paste the service account JSON now? (y/N): " paste_sa
+  local sa_path=""
+
+  if [[ "$paste_sa" =~ ^[Yy]$ ]]; then
+    sa_path="$user_home/service-account.json"
+    echo "Paste JSON content below, then press Ctrl+D when done:"
+    $SUDO install -o "$TARGET_USER" -g "$TARGET_USER" -m 600 /dev/null "$sa_path"
+    # shellcheck disable=SC2002
+    cat > /tmp/sa.tmp
+    $SUDO tee "$sa_path" >/dev/null < /tmp/sa.tmp
+    $SUDO chown "$TARGET_USER:$TARGET_USER" "$sa_path"
+    $SUDO chmod 600 "$sa_path"
+    rm -f /tmp/sa.tmp
+  else
+    read -r -p "Provide path to a Google Drive service account JSON for automated backups (leave blank to skip): " sa_path
+  fi
+
   if [[ -n "$sa_path" ]]; then
     if [[ ! -f "$sa_path" ]]; then
       echo "Service account file not found at $sa_path" >&2

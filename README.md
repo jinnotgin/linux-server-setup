@@ -13,6 +13,7 @@
 - Prompts for a username to create/ensure sudo access and docker group membership (password is requested when the user is created).
 - (Optional) Installs Docker Engine + Compose plugin and deploys Portainer (`portainer/portainer-ce`) on ports `8000` and `9443` using the `portainer_data` volume.
 - (Optional) Installs `rclone`, optionally configures a Google Drive remote using a service account JSON, and sets up a daily Portainer backup (local archive + optional Drive upload) with systemd service/timer.
+  - You can paste the service account JSON interactively; it is saved under the selected user’s home directory with correct ownership.
 - (Optional) Installs Tailscale, enables SSH + exit-node advertising, and optionally brings it up with your provided auth key.
 - Optionally renders Docker Compose templates with your inputs (domain/email/UUIDs/TLS paths) into the `generated/` folder, and can start the stacks right after rendering if Docker is present.
 

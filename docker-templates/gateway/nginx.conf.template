@@ -31,6 +31,7 @@ http {
   # Fallback website used by Vision fallback (served on an internal-only port)
   server {
     listen 20002;
+    listen [::]:20002;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;

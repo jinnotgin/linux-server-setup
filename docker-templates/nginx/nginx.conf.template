@@ -9,8 +9,9 @@ http {
   server_tokens off;
 
   server {
-    listen {{NGINX_HTTPS_PORT}} ssl http2;
-    listen [::]:{{NGINX_HTTPS_PORT}} ssl http2;
+    listen {{NGINX_HTTPS_PORT}} ssl;
+    listen [::]:{{NGINX_HTTPS_PORT}} ssl;
+    http2 on;
     server_name {{PRIMARY_DOMAIN}};
 
     ssl_certificate {{TLS_CERT_PATH}};

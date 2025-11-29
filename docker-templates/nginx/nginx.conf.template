@@ -1,0 +1,32 @@
+worker_processes auto;
+events { worker_connections 1024; }
+
+http {
+  include /etc/nginx/mime.types;
+  default_type application/octet-stream;
+  sendfile on;
+  keepalive_timeout 65;
+
+  server {
+    listen 443 ssl http2;
+    server_name {{PRIMARY_DOMAIN}};
+
+    ssl_certificate {{TLS_CERT_PATH}};
+    ssl_certificate_key {{TLS_KEY_PATH}};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    location /ws {
+      proxy_pass http://{{VLESS_UPSTREAM}};
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_set_header Host $host;
+    }
+
+    location / {
+      return 200 "Nginx reverse proxy is running\n";
+    }
+  }
+}

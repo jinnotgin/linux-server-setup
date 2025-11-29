@@ -249,7 +249,7 @@ generate_hysteria_users() {
 ensure_proxy_network() {
   local net="proxy_net"
   if command -v docker >/dev/null 2>&1 && ! docker network inspect "$net" >/dev/null 2>&1; then
-    echo "Creating shared proxy network '$net' for Caddy/Xray interop..."
+    echo "Creating shared proxy network '$net' for Nginx/Xray interop..."
     $SUDO docker network create "$net"
   fi
 }
@@ -268,7 +268,7 @@ render_templates() {
   mkdir -p "$GENERATED_DIR"
   echo "Collecting domain information (supports multiple domains)..."
   collect_domains
-  read -r -p "Contact email for certificates (used by Certbot/Caddy): " CERT_EMAIL
+  read -r -p "Contact email for certificates (used by Certbot/Nginx): " CERT_EMAIL
 
   generate_vless_clients
   generate_hysteria_users
@@ -286,15 +286,15 @@ render_templates() {
     DOMAINS "$DOMAINS_ARGS" CERT_EMAIL "$CERT_EMAIL"
   COMPOSE_OUTPUTS+=("$GENERATED_DIR/ssl-renewal.yml")
 
-  # Render Caddy reverse proxy
-  mkdir -p "$GENERATED_DIR/caddy"
-  render_template_file "$TEMPLATE_DIR/caddy/Caddyfile.template" \
-    "$GENERATED_DIR/caddy/Caddyfile" \
+  # Render Nginx reverse proxy
+  mkdir -p "$GENERATED_DIR/nginx"
+  render_template_file "$TEMPLATE_DIR/nginx/nginx.conf.template" \
+    "$GENERATED_DIR/nginx/nginx.conf" \
     PRIMARY_DOMAIN "$PRIMARY_DOMAIN" TLS_CERT_PATH "$TLS_CERT" TLS_KEY_PATH "$TLS_KEY" VLESS_UPSTREAM "xray-vless-ws:10000"
-  render_template_file "$TEMPLATE_DIR/caddy/docker-compose.yml.template" \
-    "$GENERATED_DIR/caddy/docker-compose.yml" \
+  render_template_file "$TEMPLATE_DIR/nginx/docker-compose.yml.template" \
+    "$GENERATED_DIR/nginx/docker-compose.yml" \
     PRIMARY_DOMAIN "$PRIMARY_DOMAIN"
-  COMPOSE_OUTPUTS+=("$GENERATED_DIR/caddy/docker-compose.yml")
+  COMPOSE_OUTPUTS+=("$GENERATED_DIR/nginx/docker-compose.yml")
 
   # Render VLESS
   mkdir -p "$GENERATED_DIR/vless-ws"

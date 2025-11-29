@@ -353,20 +353,21 @@ generate_reality_keys() {
   local priv="" pub=""
   REALITY_HAS_KEYS=false
 
+  # helper: run a command that outputs x25519 keys and parse Private/Public (handles "PrivateKey" or "Private key")
+  parse_keys() {
+    local output="$1" p pb
+    p=$(echo "$output" | awk -F': *' '/PrivateKey|Private key/ {print $2; exit}')
+    pb=$(echo "$output" | awk -F': *' '/PublicKey|Public key/ {print $2; exit}')
+    echo "$p" "$pb"
+  }
+
+  # Try docker-based xray
   if command -v docker >/dev/null 2>&1; then
     if output=$(docker run --rm teddysun/xray:latest xray x25519 2>/dev/null); then
-      priv=$(echo "$output" | awk '/Private key/ {print $3}')
-      pub=$(echo "$output" | awk '/Public key/ {print $3}')
-      if [[ -n "$priv" && -n "$pub" ]]; then
-        REALITY_HAS_KEYS=true
+      read -r priv pub <<<"$(parse_keys "$output")"
+      if [[ -n "$priv" && -z "$pub" ]]; then
+        pub=$(docker run --rm teddysun/xray:latest xray x25519 -i "$priv" 2>/dev/null | awk -F': *' '/PublicKey|Public key/ {print $2; exit}')
       fi
-    fi
-  fi
-
-  if [[ $REALITY_HAS_KEYS == false && -x /usr/local/bin/xray ]]; then
-    if output=$(/usr/local/bin/xray x25519 2>/dev/null); then
-      priv=$(echo "$output" | awk '/Private key/ {print $3}')
-      pub=$(echo "$output" | awk '/Public key/ {print $3}')
       if [[ -n "$priv" && -n "$pub" ]]; then
         REALITY_HAS_KEYS=true
       fi
@@ -375,11 +376,20 @@ generate_reality_keys() {
 
   if [[ $REALITY_HAS_KEYS == false ]]; then
     if command -v openssl >/dev/null 2>&1; then
-      priv=$(openssl rand -hex 32)
+      local tmpdir
+      tmpdir=$(mktemp -d)
+      if openssl genpkey -algorithm X25519 -out "$tmpdir/x25519-priv.pem" >/dev/null 2>&1; then
+        openssl pkey -in "$tmpdir/x25519-priv.pem" -pubout -out "$tmpdir/x25519-pub.pem" >/dev/null 2>&1 || true
+        priv=$(openssl pkey -in "$tmpdir/x25519-priv.pem" -outform DER 2>/dev/null | base64 -w0 2>/dev/null)
+        pub=$(openssl pkey -in "$tmpdir/x25519-pub.pem" -pubin -outform DER 2>/dev/null | base64 -w0 2>/dev/null)
+      fi
+      rm -rf "$tmpdir"
+      priv=${priv:-"REPLACE_WITH_PRIVATE_KEY"}
+      pub=${pub:-"REPLACE_WITH_PUBLIC_KEY"}
     else
       priv="REPLACE_WITH_PRIVATE_KEY"
+      pub="REPLACE_WITH_PUBLIC_KEY"
     fi
-    pub=${pub:-"REPLACE_WITH_PUBLIC_KEY"}
   fi
 
   REALITY_PRIVATE_KEY="$priv"
@@ -646,7 +656,7 @@ render_templates() {
     summary+="  VLESS XHTTP Reality on 443 path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
     summary+="    SNI: $REALITY_SNI_INPUT"$'\n'
     if [[ "$reality_pub" == "REPLACE_WITH_PUBLIC_KEY" ]]; then
-      summary+="    Public key: NOT GENERATED (install docker/xray and run 'docker run --rm teddysun/xray:latest xray x25519')"$'\n'
+      summary+="    Public key: NOT GENERATED (install docker and run 'docker run --rm teddysun/xray:latest xray x25519')"$'\n'
     else
       summary+="    Public key: $reality_pub"$'\n'
     fi

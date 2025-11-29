@@ -364,8 +364,7 @@ install_tailscale() {
   $SUDO systemctl enable --now tailscaled
 
   # Pre-set preferences as requested
-  $SUDO tailscale set --ssh
-  $SUDO tailscale set --advertise-exit-node
+  $SUDO tailscale set --ssh --advertise-exit-node
 
   read -r -p "Tailscale auth key (tskey-..., leave blank to skip bringing the node up now): " tailscale_key
   if [[ -n "$tailscale_key" ]]; then

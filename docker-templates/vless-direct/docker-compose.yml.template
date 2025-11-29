@@ -1,11 +1,12 @@
 version: "3.9"
 services:
-  xray:
+  vless-direct:
     image: teddysun/xray:latest
-    container_name: xray-vless-ws
+    container_name: vless-direct
     restart: unless-stopped
     volumes:
       - ./config.json:/etc/xray/config.json:ro
+      - ./certs:/certs:ro
     networks:
       - proxy_net
     command: ["xray", "run", "-config", "/etc/xray/config.json"]

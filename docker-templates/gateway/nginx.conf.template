@@ -1,0 +1,38 @@
+worker_processes auto;
+events { worker_connections 1024; }
+
+stream {
+  # Route based on SNI: CDN domain to HTTPS terminator, direct domain to VLESS Vision, everything else to VLESS XHTTP Reality
+  map $ssl_preread_server_name $upstream_name {
+    {{CDN_MAP_ENTRY}}
+    {{DIRECT_DOMAIN}} vision;
+    default xhttp-reality;
+  }
+
+  upstream vision {
+    server {{VLESS_DIRECT_HOST}}:20001;
+  }
+
+  upstream xhttp-reality {
+    server {{VLESS_DIRECT_HOST}}:30001;
+  }
+
+  {{CDN_UPSTREAM_BLOCK}}
+
+  server {
+    listen 443 reuseport;
+    listen [::]:443 reuseport;
+    ssl_preread on;
+    proxy_pass $upstream_name;
+  }
+}
+
+http {
+  # Fallback website used by Vision fallback (served on an internal-only port)
+  server {
+    listen 20002;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+  }
+}

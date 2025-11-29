@@ -1,0 +1,8 @@
+version: "3.9"
+services:
+  healthcheck-pinger:
+    image: curlimages/curl:latest
+    container_name: healthcheck-pinger
+    restart: unless-stopped
+    command: >
+      sh -c "while true; do curl -fsS '{{HEALTHCHECK_URL}}' || true; sleep 300; done"

@@ -199,35 +199,70 @@ render_template_file() {
   printf "%s" "$content" > "$dest"
 }
 
-collect_domains() {
+collect_domains_with_roles() {
   local domains=()
   while true; do
     read -r -p "Enter a domain to include (leave blank to finish): " d
     [[ -z "$d" ]] && break
     domains+=("$d")
   done
+
   if [[ ${#domains[@]} -eq 0 ]]; then
     echo "At least one domain is required." >&2
     exit 1
   fi
-  DOMAINS_ARRAY=("${domains[@]}")
-  DOMAINS_ARGS="-d ${domains[*]/#/-d }"
-  PRIMARY_DOMAIN="${domains[0]}"
+
+  if [[ ${#domains[@]} -eq 1 ]]; then
+    local choice
+    read -r -p "Single domain '${domains[0]}' detected. Use it for CDN (VLESS+WS via Cloudflare) or Direct (Hysteria2 + Vision + XHTTP Reality)? [cdn/direct]: " choice
+    case "${choice,,}" in
+      cdn|"") CDN_DOMAIN="${domains[0]}"; DIRECT_DOMAIN="";;
+      direct) DIRECT_DOMAIN="${domains[0]}"; CDN_DOMAIN="";;
+      *) echo "Invalid choice. Use 'cdn' or 'direct'." >&2; exit 1;;
+    esac
+  else
+    echo "You entered: ${domains[*]}"
+    read -r -p "Pick the CDN domain for VLESS+WS (Cloudflare-friendly). Leave blank to skip CDN: " CDN_DOMAIN
+    read -r -p "Pick the Direct domain for Hysteria2 + Vision + XHTTP Reality (no CDN). Leave blank to skip direct: " DIRECT_DOMAIN
+
+    if [[ -n "$CDN_DOMAIN" && ! " ${domains[*]} " =~ " ${CDN_DOMAIN} " ]]; then
+      echo "CDN domain '$CDN_DOMAIN' not in provided list." >&2
+      exit 1
+    fi
+    if [[ -n "$DIRECT_DOMAIN" && ! " ${domains[*]} " =~ " ${DIRECT_DOMAIN} " ]]; then
+      echo "Direct domain '$DIRECT_DOMAIN' not in provided list." >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -z "${CDN_DOMAIN:-}" && -z "${DIRECT_DOMAIN:-}" ]]; then
+    echo "At least one role (CDN or Direct) must be selected." >&2
+    exit 1
+  fi
+
+  DOMAINS_ARRAY=()
+  [[ -n "${CDN_DOMAIN:-}" ]] && DOMAINS_ARRAY+=("$CDN_DOMAIN")
+  if [[ -n "${DIRECT_DOMAIN:-}" && "$DIRECT_DOMAIN" != "$CDN_DOMAIN" ]]; then
+    DOMAINS_ARRAY+=("$DIRECT_DOMAIN")
+  fi
+  DOMAINS_ARGS="${DOMAINS_ARRAY[*]/#/-d }"
+  PRIMARY_DOMAIN="${CDN_DOMAIN:-$DIRECT_DOMAIN}"
 }
 
 generate_vless_clients() {
+  local label="$1" flow="$2" out_var="$3"
   local count
-  read -r -p "How many VLESS accounts do you want? " count
+  read -r -p "How many VLESS accounts for ${label}? " count
   [[ -z "$count" ]] && count=1
   local clients=()
   for ((i=1; i<=count; i++)); do
-    read -r -p "UUID for VLESS user $i (leave blank to auto-generate): " uuid
+    read -r -p "UUID for ${label} user $i (leave blank to auto-generate): " uuid
     if [[ -z "$uuid" ]]; then
       uuid=$(uuidgen)
     fi
-    clients+=("{\"id\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}")
+    clients+=("{\"id\":\"$uuid\"${flow:+,\"flow\":\"$flow\"}}")
   done
-  VLESS_CLIENTS="[$(IFS=,; echo "${clients[*]}")]"
+  printf -v "$out_var" "[%s]" "$(IFS=,; echo "${clients[*]}")"
 }
 
 generate_hysteria_users() {
@@ -246,6 +281,28 @@ generate_hysteria_users() {
   HYSTERIA_USERS="[$(IFS=,; echo "${users[*]}")]"
 }
 
+generate_reality_keys() {
+  local priv pub
+  if command -v docker >/dev/null 2>&1; then
+    if output=$(docker run --rm teddysun/xray:latest xray x25519 2>/dev/null); then
+      priv=$(echo "$output" | awk '/Private key/ {print $3}')
+      pub=$(echo "$output" | awk '/Public key/ {print $3}')
+    fi
+  fi
+
+  if [[ -z "$priv" || -z "$pub" ]]; then
+    if command -v openssl >/dev/null 2>&1; then
+      priv=$(openssl rand -hex 32)
+    else
+      priv="REPLACE_WITH_PRIVATE_KEY"
+    fi
+    pub=${pub:-"REPLACE_WITH_PUBLIC_KEY"}
+  fi
+
+  REALITY_PRIVATE_KEY="$priv"
+  REALITY_PUBLIC_KEY="$pub"
+}
+
 ensure_proxy_network() {
   local net="proxy_net"
   if command -v docker >/dev/null 2>&1 && ! docker network inspect "$net" >/dev/null 2>&1; then
@@ -255,7 +312,7 @@ ensure_proxy_network() {
 }
 
 seed_nginx_site() {
-  local dest="$GENERATED_DIR/nginx/www"
+  local dest="$1"
   mkdir -p "$dest"
 
   read -r -p "Download sample 2048 static site into Nginx web root? (y/N): " seed_site
@@ -313,57 +370,163 @@ render_templates() {
 
   mkdir -p "$GENERATED_DIR"
   echo "Collecting domain information (supports multiple domains)..."
-  collect_domains
+  collect_domains_with_roles
   read -r -p "Contact email for certificates (used by Certbot/Nginx): " CERT_EMAIL
 
-  generate_vless_clients
-  generate_hysteria_users
+  local render_cdn="n" render_direct="n"
+  if [[ -n "${CDN_DOMAIN:-}" ]]; then
+    read -r -p "Generate CDN VLESS+WS stack for $CDN_DOMAIN (Cloudflare-friendly)? (y/N): " render_cdn
+  fi
+  if [[ -n "${DIRECT_DOMAIN:-}" ]]; then
+    read -r -p "Generate Direct stack (Hysteria2 + Vision + XHTTP Reality) for $DIRECT_DOMAIN? (y/N): " render_direct
+  fi
+  read -r -p "Generate a lightweight health ping container (curl every 5 minutes)? (y/N): " render_health
 
-  local tls_cert="/certs/live/${PRIMARY_DOMAIN}/fullchain.pem"
-  local tls_key="/certs/live/${PRIMARY_DOMAIN}/privkey.pem"
-  read -r -p "Path to TLS certificate (default: $tls_cert): " input_cert
-  read -r -p "Path to TLS private key (default: $tls_key): " input_key
-  TLS_CERT=${input_cert:-$tls_cert}
-  TLS_KEY=${input_key:-$tls_key}
+  if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_health" =~ ^[Yy]$ ]]; then
+    echo "No stacks selected for rendering."
+    return
+  fi
 
-  # Render SSL renewal
+  # Render SSL renewal (covers all selected domains)
   render_template_file "$TEMPLATE_DIR/ssl-renewal/docker-compose.yml.template" \
     "$GENERATED_DIR/ssl-renewal.yml" \
     DOMAINS "$DOMAINS_ARGS" CERT_EMAIL "$CERT_EMAIL"
   COMPOSE_OUTPUTS+=("$GENERATED_DIR/ssl-renewal.yml")
 
-  # Render Nginx reverse proxy
-  mkdir -p "$GENERATED_DIR/nginx"
-  seed_nginx_site
-  render_template_file "$TEMPLATE_DIR/nginx/nginx.conf.template" \
-    "$GENERATED_DIR/nginx/nginx.conf" \
-    PRIMARY_DOMAIN "$PRIMARY_DOMAIN" TLS_CERT_PATH "$TLS_CERT" TLS_KEY_PATH "$TLS_KEY" VLESS_UPSTREAM "xray-vless-ws:10000"
-  render_template_file "$TEMPLATE_DIR/nginx/docker-compose.yml.template" \
-    "$GENERATED_DIR/nginx/docker-compose.yml" \
-    PRIMARY_DOMAIN "$PRIMARY_DOMAIN"
-  COMPOSE_OUTPUTS+=("$GENERATED_DIR/nginx/docker-compose.yml")
+  # CDN / VLESS over WS (Cloudflare OK)
+  if [[ "$render_cdn" =~ ^[Yy]$ ]]; then
+    local tls_cert_cdn="/certs/live/${CDN_DOMAIN}/fullchain.pem"
+    local tls_key_cdn="/certs/live/${CDN_DOMAIN}/privkey.pem"
+    read -r -p "Path to TLS certificate for CDN domain (default: $tls_cert_cdn): " input_cert
+    read -r -p "Path to TLS private key for CDN domain (default: $tls_key_cdn): " input_key
+    tls_cert_cdn=${input_cert:-$tls_cert_cdn}
+    tls_key_cdn=${input_key:-$tls_key_cdn}
 
-  # Render VLESS
-  mkdir -p "$GENERATED_DIR/vless-ws"
-  render_template_file "$TEMPLATE_DIR/vless-ws/config.json.template" \
-    "$GENERATED_DIR/vless-ws/config.json" \
-    PRIMARY_DOMAIN "$PRIMARY_DOMAIN" VLESS_CLIENTS "$VLESS_CLIENTS"
-  render_template_file "$TEMPLATE_DIR/vless-ws/docker-compose.yml.template" \
-    "$GENERATED_DIR/vless-ws/docker-compose.yml" \
-    PRIMARY_DOMAIN "$PRIMARY_DOMAIN"
-  COMPOSE_OUTPUTS+=("$GENERATED_DIR/vless-ws/docker-compose.yml")
+    generate_vless_clients "VLESS over WebSocket" "" VLESS_WS_CLIENTS
+    mkdir -p "$GENERATED_DIR/nginx" "$GENERATED_DIR/vless-cdn"
 
-  # Render Hysteria2
-  mkdir -p "$GENERATED_DIR/hysteria2"
-  read -r -p "Masquerade site for Hysteria2 (default: https://news.ycombinator.com): " MASQ
-  MASQ=${MASQ:-https://news.ycombinator.com}
-  render_template_file "$TEMPLATE_DIR/hysteria2/config.yaml.template" \
-    "$GENERATED_DIR/hysteria2/config.yaml" \
-    PRIMARY_DOMAIN "$PRIMARY_DOMAIN" HYSTERIA_USERS "$HYSTERIA_USERS" TLS_CERT "$TLS_CERT" TLS_KEY "$TLS_KEY" MASQUERADE "$MASQ"
-  render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
-    "$GENERATED_DIR/hysteria2/docker-compose.yml" \
-    PRIMARY_DOMAIN "$PRIMARY_DOMAIN"
-  COMPOSE_OUTPUTS+=("$GENERATED_DIR/hysteria2/docker-compose.yml")
+    local nginx_port="443"
+    if [[ "$render_direct" =~ ^[Yy]$ ]]; then
+      nginx_port="6443"
+    fi
+
+    seed_nginx_site "$GENERATED_DIR/nginx/www"
+    render_template_file "$TEMPLATE_DIR/nginx/nginx.conf.template" \
+      "$GENERATED_DIR/nginx/nginx.conf" \
+      PRIMARY_DOMAIN "$CDN_DOMAIN" TLS_CERT_PATH "$tls_cert_cdn" TLS_KEY_PATH "$tls_key_cdn" VLESS_UPSTREAM "vless-cdn:10000" NGINX_HTTPS_PORT "$nginx_port"
+    render_template_file "$TEMPLATE_DIR/nginx/docker-compose.yml.template" \
+      "$GENERATED_DIR/nginx/docker-compose.yml" \
+      PRIMARY_DOMAIN "$CDN_DOMAIN" NGINX_HTTPS_PORT "$nginx_port"
+    COMPOSE_OUTPUTS+=("$GENERATED_DIR/nginx/docker-compose.yml")
+
+    render_template_file "$TEMPLATE_DIR/vless-cdn/config.json.template" \
+      "$GENERATED_DIR/vless-cdn/config.json" \
+      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CLIENTS "$VLESS_WS_CLIENTS"
+    render_template_file "$TEMPLATE_DIR/vless-cdn/docker-compose.yml.template" \
+      "$GENERATED_DIR/vless-cdn/docker-compose.yml" \
+      PRIMARY_DOMAIN "$CDN_DOMAIN"
+    COMPOSE_OUTPUTS+=("$GENERATED_DIR/vless-cdn/docker-compose.yml")
+  fi
+
+  # Direct stack: Hysteria2 + Vision + XHTTP Reality (no CDN)
+  if [[ "$render_direct" =~ ^[Yy]$ ]]; then
+    local tls_cert_direct="/certs/live/${DIRECT_DOMAIN}/fullchain.pem"
+    local tls_key_direct="/certs/live/${DIRECT_DOMAIN}/privkey.pem"
+    read -r -p "Path to TLS certificate for Direct domain (default: $tls_cert_direct): " input_cert_d
+    read -r -p "Path to TLS private key for Direct domain (default: $tls_key_direct): " input_key_d
+    tls_cert_direct=${input_cert_d:-$tls_cert_direct}
+    tls_key_direct=${input_key_d:-$tls_key_direct}
+
+    generate_vless_clients "VLESS Vision (XTLS)" "xtls-rprx-vision" VISION_CLIENTS
+    generate_vless_clients "VLESS XHTTP Reality" "xtls-rprx-vision" REALITY_CLIENTS
+    generate_hysteria_users
+
+    read -r -p "XHTTP path (default: /somepath): " XHTTP_PATH
+    XHTTP_PATH=${XHTTP_PATH:-/somepath}
+    read -r -p "Reality target (default: microsoft.com:443): " REALITY_TARGET
+    REALITY_TARGET=${REALITY_TARGET:-microsoft.com:443}
+    read -r -p "Reality SNI server names (comma-separated, default: www.microsoft.com,microsoft.com): " REALITY_SNI_INPUT
+    REALITY_SNI_INPUT=${REALITY_SNI_INPUT:-www.microsoft.com,microsoft.com}
+    IFS=',' read -r -a sni_arr <<< "$REALITY_SNI_INPUT"
+    local sni_json="["
+    for host in "${sni_arr[@]}"; do
+      sni_json+="\"${host}\","
+    done
+    sni_json="${sni_json%,}]"
+
+    read -r -p "Reality short IDs (comma-separated, include empty entry to allow blank, default: ,0123456789abcdef): " REALITY_SHORT_INPUT
+    REALITY_SHORT_INPUT=${REALITY_SHORT_INPUT:-,0123456789abcdef}
+    IFS=',' read -r -a sid_arr <<< "$REALITY_SHORT_INPUT"
+    local sid_json="["
+    for sid in "${sid_arr[@]}"; do
+      sid_json+="\"${sid}\","
+    done
+    sid_json="${sid_json%,}]"
+
+    generate_reality_keys
+    read -r -p "Reality private key (leave blank to use generated): " input_priv
+    read -r -p "Reality public key (leave blank to use generated): " input_pub
+    local reality_priv reality_pub
+    reality_priv=${input_priv:-$REALITY_PRIVATE_KEY}
+    reality_pub=${input_pub:-$REALITY_PUBLIC_KEY}
+
+    # Gateway for SNI routing + fallback site
+    mkdir -p "$GENERATED_DIR/gateway"
+    seed_nginx_site "$GENERATED_DIR/gateway/www"
+
+    local cdn_map_entry="# CDN domain not configured"
+    local cdn_upstream="# No CDN upstream configured"
+    local vless_direct_host="vless-direct"
+    local cdn_upstream_host="cdn-proxy"
+
+    if [[ "$render_cdn" =~ ^[Yy]$ ]]; then
+      cdn_map_entry="$CDN_DOMAIN cdn;"
+      cdn_upstream="upstream cdn { server ${cdn_upstream_host}:6443; }"
+    fi
+
+    render_template_file "$TEMPLATE_DIR/gateway/nginx.conf.template" \
+      "$GENERATED_DIR/gateway/nginx.conf" \
+      CDN_MAP_ENTRY "$cdn_map_entry" CDN_UPSTREAM_BLOCK "$cdn_upstream" DIRECT_DOMAIN "$DIRECT_DOMAIN" VLESS_DIRECT_HOST "$vless_direct_host"
+    render_template_file "$TEMPLATE_DIR/gateway/docker-compose.yml.template" \
+      "$GENERATED_DIR/gateway/docker-compose.yml" \
+      DIRECT_DOMAIN "$DIRECT_DOMAIN"
+    COMPOSE_OUTPUTS+=("$GENERATED_DIR/gateway/docker-compose.yml")
+
+    # VLESS direct (Vision + XHTTP Reality)
+    mkdir -p "$GENERATED_DIR/vless-direct"
+    render_template_file "$TEMPLATE_DIR/vless-direct/config.json.template" \
+      "$GENERATED_DIR/vless-direct/config.json" \
+      VISION_CLIENTS "$VISION_CLIENTS" REALITY_CLIENTS "$REALITY_CLIENTS" XHTTP_PATH "$XHTTP_PATH" REALITY_TARGET "$REALITY_TARGET" REALITY_SERVERNAMES "$sni_json" REALITY_PRIVATE_KEY "$reality_priv" REALITY_SHORT_IDS "$sid_json" DIRECT_TLS_CERT "$tls_cert_direct" DIRECT_TLS_KEY "$tls_key_direct" FALLBACK_DEST "gateway:20002"
+    render_template_file "$TEMPLATE_DIR/vless-direct/docker-compose.yml.template" \
+      "$GENERATED_DIR/vless-direct/docker-compose.yml"
+    COMPOSE_OUTPUTS+=("$GENERATED_DIR/vless-direct/docker-compose.yml")
+
+    # Hysteria2 (direct)
+    mkdir -p "$GENERATED_DIR/hysteria2"
+    read -r -p "Masquerade site for Hysteria2 (default: https://news.ycombinator.com): " MASQ
+    MASQ=${MASQ:-https://news.ycombinator.com}
+    render_template_file "$TEMPLATE_DIR/hysteria2/config.yaml.template" \
+      "$GENERATED_DIR/hysteria2/config.yaml" \
+      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_USERS "$HYSTERIA_USERS" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
+    render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
+      "$GENERATED_DIR/hysteria2/docker-compose.yml" \
+      PRIMARY_DOMAIN "$DIRECT_DOMAIN"
+    COMPOSE_OUTPUTS+=("$GENERATED_DIR/hysteria2/docker-compose.yml")
+  fi
+
+  # Healthcheck pinger (curl every 5 minutes)
+  if [[ "$render_health" =~ ^[Yy]$ ]]; then
+    read -r -p "Healthcheck URL to ping: " HEALTHCHECK_URL
+    if [[ -z "$HEALTHCHECK_URL" ]]; then
+      echo "Healthcheck URL is required when enabling the pinger." >&2
+    else
+      mkdir -p "$GENERATED_DIR/healthcheck"
+      render_template_file "$TEMPLATE_DIR/healthcheck/docker-compose.yml.template" \
+        "$GENERATED_DIR/healthcheck/docker-compose.yml" \
+        HEALTHCHECK_URL "$HEALTHCHECK_URL"
+      COMPOSE_OUTPUTS+=("$GENERATED_DIR/healthcheck/docker-compose.yml")
+    fi
+  fi
 
   echo "Templates rendered under $GENERATED_DIR. Update ports/paths as needed and run 'docker compose up -d' inside each directory."
 }

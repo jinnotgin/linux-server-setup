@@ -1,0 +1,62 @@
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "listen": "0.0.0.0",
+      "port": 20001,
+      "protocol": "vless",
+      "settings": {
+        "clients": {{VISION_CLIENTS}},
+        "decryption": "none",
+        "fallbacks": [
+          {
+            "alpn": "h2",
+            "dest": "{{FALLBACK_DEST}}",
+            "xver": 1
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "rejectUnknownSni": true,
+          "minVersion": "1.2",
+          "certificates": [
+            {
+              "ocspStapling": 3600,
+              "certificateFile": "{{DIRECT_TLS_CERT}}",
+              "keyFile": "{{DIRECT_TLS_KEY}}"
+            }
+          ]
+        }
+      },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
+    },
+    {
+      "listen": "0.0.0.0",
+      "port": 30001,
+      "protocol": "vless",
+      "settings": {
+        "clients": {{REALITY_CLIENTS}},
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "xhttpSettings": { "path": "{{XHTTP_PATH}}" },
+        "security": "reality",
+        "realitySettings": {
+          "target": "{{REALITY_TARGET}}",
+          "serverNames": {{REALITY_SERVERNAMES}},
+          "privateKey": "{{REALITY_PRIVATE_KEY}}",
+          "shortIds": {{REALITY_SHORT_IDS}}
+        }
+      },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }
+    }
+  ],
+  "outbounds": [
+    { "protocol": "freedom", "tag": "direct" },
+    { "protocol": "blackhole", "tag": "block" }
+  ]
+}

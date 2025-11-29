@@ -250,26 +250,28 @@ collect_domains_with_roles() {
 }
 
 generate_vless_clients() {
-  local label="$1" flow="$2" out_var="$3"
+  local label="$1" flow="$2" out_var="$3" ids_out_var="$4"
   local count
   read -r -p "How many VLESS accounts for ${label}? " count
   [[ -z "$count" ]] && count=1
-  local clients=()
+  local clients=() ids=()
   for ((i=1; i<=count; i++)); do
     read -r -p "UUID for ${label} user $i (leave blank to auto-generate): " uuid
     if [[ -z "$uuid" ]]; then
       uuid=$(uuidgen)
     fi
     clients+=("{\"id\":\"$uuid\"${flow:+,\"flow\":\"$flow\"}}")
+    ids+=("$uuid")
   done
   printf -v "$out_var" "[%s]" "$(IFS=,; echo "${clients[*]}")"
+  printf -v "$ids_out_var" "%s" "$(IFS=', '; echo "${ids[*]}")"
 }
 
 generate_hysteria_users() {
   local count
   read -r -p "How many Hysteria2 users do you want? " count
   [[ -z "$count" ]] && count=1
-  local users=()
+  local users=() printable=()
   for ((i=1; i<=count; i++)); do
     read -r -p "Username for Hysteria user $i: " uname
     read -r -p "Password for $uname (leave blank to auto-generate): " pwd
@@ -277,8 +279,10 @@ generate_hysteria_users() {
       pwd=$(openssl rand -hex 12)
     fi
     users+=("{\"name\":\"$uname\",\"password\":\"$pwd\"}")
+    printable+=("$uname/$pwd")
   done
   HYSTERIA_USERS="[$(IFS=,; echo "${users[*]}")]"
+  HYSTERIA_USERS_PRINT="$(IFS=', '; echo "${printable[*]}")"
 }
 
 generate_reality_keys() {
@@ -373,6 +377,8 @@ render_templates() {
   collect_domains_with_roles
   read -r -p "Contact email for certificates (used by Certbot/Nginx): " CERT_EMAIL
 
+  local summary="Client setup summary\nGenerated at $(date -Iseconds)\n"
+
   local render_cdn="n" render_direct="n"
   if [[ -n "${CDN_DOMAIN:-}" ]]; then
     read -r -p "Generate CDN VLESS+WS stack for $CDN_DOMAIN (Cloudflare-friendly)? (y/N): " render_cdn
@@ -402,7 +408,7 @@ render_templates() {
     tls_cert_cdn=${input_cert:-$tls_cert_cdn}
     tls_key_cdn=${input_key:-$tls_key_cdn}
 
-    generate_vless_clients "VLESS over WebSocket" "" VLESS_WS_CLIENTS
+    generate_vless_clients "VLESS over WebSocket" "" VLESS_WS_CLIENTS VLESS_WS_IDS
     mkdir -p "$GENERATED_DIR/nginx" "$GENERATED_DIR/vless-cdn"
 
     local nginx_port="443"
@@ -426,6 +432,12 @@ render_templates() {
       "$GENERATED_DIR/vless-cdn/docker-compose.yml" \
       PRIMARY_DOMAIN "$CDN_DOMAIN"
     COMPOSE_OUTPUTS+=("$GENERATED_DIR/vless-cdn/docker-compose.yml")
+
+    summary+=$'\n'"CDN VLESS over WebSocket (via $CDN_DOMAIN)"$'\n'
+    summary+="  External: https://$CDN_DOMAIN:443/ws (Cloudflare OK)"$'\n'
+    summary+="  Internal TLS port (if gateway enabled): $nginx_port"$'\n'
+    summary+="  UUIDs: $VLESS_WS_IDS"$'\n'
+    summary+="  TLS cert/key: $tls_cert_cdn | $tls_key_cdn"$'\n'
   fi
 
   # Direct stack: Hysteria2 + Vision + XHTTP Reality (no CDN)
@@ -437,8 +449,8 @@ render_templates() {
     tls_cert_direct=${input_cert_d:-$tls_cert_direct}
     tls_key_direct=${input_key_d:-$tls_key_direct}
 
-    generate_vless_clients "VLESS Vision (XTLS)" "xtls-rprx-vision" VISION_CLIENTS
-    generate_vless_clients "VLESS XHTTP Reality" "xtls-rprx-vision" REALITY_CLIENTS
+    generate_vless_clients "VLESS Vision (XTLS)" "xtls-rprx-vision" VISION_CLIENTS VISION_IDS
+    generate_vless_clients "VLESS XHTTP Reality" "xtls-rprx-vision" REALITY_CLIENTS REALITY_IDS
     generate_hysteria_users
 
     read -r -p "XHTTP path (default: /somepath): " XHTTP_PATH
@@ -512,6 +524,16 @@ render_templates() {
       "$GENERATED_DIR/hysteria2/docker-compose.yml" \
       PRIMARY_DOMAIN "$DIRECT_DOMAIN"
     COMPOSE_OUTPUTS+=("$GENERATED_DIR/hysteria2/docker-compose.yml")
+
+    summary+=$'\n'"Direct stack (no CDN) via $DIRECT_DOMAIN"$'\n'
+    summary+="  VLESS Vision (XTLS) on 443 SNI=$DIRECT_DOMAIN, UUIDs: $VISION_IDS"$'\n'
+    summary+="  VLESS XHTTP Reality on 443 path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
+    summary+="    SNI: $REALITY_SNI_INPUT"$'\n'
+    summary+="    Public key: $reality_pub"$'\n'
+    summary+="    Short IDs: $REALITY_SHORT_INPUT"$'\n'
+    summary+="    UUIDs: $REALITY_IDS"$'\n'
+    summary+="  Hysteria2 on 8443 TCP/UDP, users: $HYSTERIA_USERS_PRINT"$'\n'
+    summary+="  TLS cert/key: $tls_cert_direct | $tls_key_direct"$'\n'
   fi
 
   # Healthcheck pinger (curl every 5 minutes)
@@ -525,7 +547,14 @@ render_templates() {
         "$GENERATED_DIR/healthcheck/docker-compose.yml" \
         HEALTHCHECK_URL "$HEALTHCHECK_URL"
       COMPOSE_OUTPUTS+=("$GENERATED_DIR/healthcheck/docker-compose.yml")
+      summary+=$'\n'"Healthcheck: curl $HEALTHCHECK_URL every 5 minutes"$'\n'
     fi
+  fi
+
+  if [[ -n "$summary" ]]; then
+    local summary_file="$GENERATED_DIR/summary.txt"
+    printf "%s\n" "$summary" > "$summary_file"
+    echo "Wrote client summary to $summary_file"
   fi
 
   echo "Templates rendered under $GENERATED_DIR. Update ports/paths as needed and run 'docker compose up -d' inside each directory."

@@ -35,12 +35,12 @@ See [`docs/portainer-backup.md`](docs/portainer-backup.md) for details on how th
 ## Template overview (`docker-templates/`)
 - The script can render these into `generated/` with your answers:
   - **ssl-renewal**: `certbot` standalone renewal that keeps certificates under `./certs`. Supports multiple domains. Binds port 80 only so it can coexist with other stacks.
-  - **cdn-proxy (Nginx)**: reverse proxy for the CDN domain that serves TLS using the certificates from `./certs` and proxies `/ws` to the VLESS WS container over `proxy_net`. When both CDN + Direct are enabled, it listens internally on **6443** (the gateway handles public 443).
-  - **vless-cdn**: `teddysun/xray` serving VLESS over WebSocket without terminating TLS (the CDN Nginx layer terminates TLS and forwards to this service on port 10000 inside `proxy_net`). Supports multiple UUID clients.
-  - **gateway**: Nginx stream router on port 443 that SNI-routes traffic: CDN domain → `cdn-proxy` (for VLESS WS), Direct domain → VLESS Vision inbound, everything else → VLESS XHTTP Reality inbound. Also serves the Vision fallback site on port 20002.
-  - **vless-direct**: `teddysun/xray` with VLESS Vision (XTLS) + VLESS XHTTP Reality inbounds using the Direct domain's TLS certificate. Vision falls back to the gateway's website; Reality targets a configurable site and supports multiple short IDs.
-  - **hysteria2**: Hysteria2 server bound to the Direct domain's certificate, supports multiple users, and masquerades to a configurable site (defaults to Hacker News).
-  - **healthcheck**: tiny curl container that pings a user-provided URL every 5 minutes (intended for healthchecks.io or similar).
+- **cdn-proxy (Nginx)**: reverse proxy for the CDN domain that serves TLS using the certificates from `./certs` and proxies `/ws` to the VLESS WS container over `proxy_net`. When both CDN + Direct are enabled, it listens internally on **6443** (the gateway handles public 443).
+- **vless-cdn**: `teddysun/xray` serving VLESS over WebSocket without terminating TLS (the CDN Nginx layer terminates TLS and forwards to this service on port 10000 inside `proxy_net`). Supports multiple UUID clients.
+- **gateway**: Nginx stream router on port 443 that SNI-routes traffic: CDN domain → `cdn-proxy` (for VLESS WS), Direct domain → VLESS Vision inbound, everything else → VLESS XHTTP Reality inbound. Also serves the Vision fallback site on port 20002.
+- **vless-direct**: `teddysun/xray` with VLESS Vision (XTLS) + VLESS XHTTP Reality inbounds using the Direct domain's TLS certificate. Vision falls back to the gateway's website; Reality targets a configurable site and supports multiple short IDs.
+- **hysteria2**: Hysteria2 server bound to the Direct domain's certificate, supports multiple users, and masquerades to a configurable site (defaults to Hacker News).
+- **healthcheck**: tiny curl container that pings a user-provided URL every 5 minutes (intended for healthchecks.io or similar).
 
 After rendering, you can let the script start the generated stacks automatically (if Docker is installed), or start them yourself with `docker compose up -d` from each generated directory.
 
@@ -51,6 +51,7 @@ After rendering, you can let the script start the generated stacks automatically
 - Keep the CDN domain behind Cloudflare only for VLESS+WS. The Direct domain must not sit behind a CDN for Vision/XHTTP Reality/Hysteria2 to work.
 - Before starting the Nginx or VLESS stacks, create the shared Docker network with `docker network create proxy_net` (the script will also create it automatically if Docker is available when you choose to auto-start stacks).
 - Update the `obfs` password in the Hysteria2 config after generation if you want a custom value.
+- A summary of client-facing details is written to `generated/summary.txt` after rendering.
 
 ## Nginx content seeding
 When rendering templates, the script can optionally download a static 2048 game (from `jinnotgin/2048`) into `generated/nginx/www` (CDN site) and `generated/gateway/www` (Vision fallback site). If you skip the download, a simple placeholder page is written to the respective `www` directories; replace it with your own site files at any time.

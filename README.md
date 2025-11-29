@@ -17,6 +17,8 @@
 
 ## Usage
 ```bash
+git clone https://github.com/jinnotgin/linux-server-setup.git
+cd linux-server-setup
 chmod +x setup.sh
 ./setup.sh
 ```

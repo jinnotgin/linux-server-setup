@@ -105,7 +105,22 @@ harden_ssh() {
 install_common_packages() {
   echo "Installing base dependencies..."
   $SUDO apt-get install -y \
-    ca-certificates curl gnupg lsb-release software-properties-common ufw sudo jq
+    ca-certificates curl gnupg lsb-release software-properties-common ufw sudo jq uuid-runtime
+}
+
+gen_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import uuid
+print(uuid.uuid4())
+PY
+  elif [[ -r /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
+  else
+    echo "ffffffff-ffff-4fff-afff-$(printf '%012x' $RANDOM)"  # last-resort
+  fi
 }
 
 install_docker() {

@@ -112,8 +112,11 @@ install_docker() {
   echo "Installing Docker and Docker Compose..."
   $SUDO install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  local distro codename
+  distro=$(. /etc/os-release && echo "$ID")
+  codename=$(lsb_release -cs)
   echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \"\$(lsb_release -cs)\" stable" | \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${distro} ${codename} stable" | \
     $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
   $SUDO apt-get update -y
   $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin

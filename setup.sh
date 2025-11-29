@@ -485,9 +485,9 @@ render_templates() {
   mkdir -p "$SSL_DIR" "$SSL_DIR/logs"
 
   # Render SSL renewal (covers all selected domains)
-  render_template_file "$TEMPLATE_DIR/ssl/docker-compose.yml.template" \
+ render_template_file "$TEMPLATE_DIR/ssl/docker-compose.yml.template" \
     "$STACK_DIR/ssl/docker-compose.yml" \
-    DOMAINS_ARGS "$DOMAINS_ARGS" DOMAINS_CSV "$DOMAINS_CSV" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$SSL_DIR/logs" DOCKER_USER "$TARGET_USER"
+    DOMAINS_ARGS "$DOMAINS_ARGS" DOMAINS_CSV "$DOMAINS_CSV" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$SSL_DIR/logs"
   COMPOSE_OUTPUTS+=("$STACK_DIR/ssl/docker-compose.yml")
 
   # CDN / VLESS over WS (Cloudflare OK)
@@ -515,7 +515,7 @@ render_templates() {
       PRIMARY_DOMAIN "$CDN_DOMAIN" TLS_CERT_PATH "$tls_cert_cdn" TLS_KEY_PATH "$tls_key_cdn" VLESS_UPSTREAM "vless-cdn:10000" NGINX_HTTPS_PORT "$nginx_port"
     render_template_file "$TEMPLATE_DIR/nginx/docker-compose.yml.template" \
       "$nginx_dir/docker-compose.yml" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" NGINX_HTTPS_PORT "$nginx_port" NGINX_CONF_PATH "$nginx_dir/nginx.conf" NGINX_WWW_PATH "$nginx_dir/www" HOST_SSL_DIR "$SSL_DIR" DOCKER_USER "$TARGET_USER"
+      PRIMARY_DOMAIN "$CDN_DOMAIN" NGINX_HTTPS_PORT "$nginx_port" NGINX_CONF_PATH "$nginx_dir/nginx.conf" NGINX_WWW_PATH "$nginx_dir/www" HOST_SSL_DIR "$SSL_DIR"
     COMPOSE_OUTPUTS+=("$nginx_dir/docker-compose.yml")
 
     render_template_file "$TEMPLATE_DIR/vless-cdn/config.json.template" \
@@ -523,7 +523,7 @@ render_templates() {
       PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CLIENTS "$VLESS_WS_CLIENTS"
     render_template_file "$TEMPLATE_DIR/vless-cdn/docker-compose.yml.template" \
       "$vless_cdn_dir/docker-compose.yml" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CDN_CONFIG_PATH "$vless_cdn_dir/config.json" DOCKER_USER "$TARGET_USER"
+      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CDN_CONFIG_PATH "$vless_cdn_dir/config.json"
     COMPOSE_OUTPUTS+=("$vless_cdn_dir/docker-compose.yml")
 
     summary+=$'\n'"CDN VLESS over WebSocket (via $CDN_DOMAIN)"$'\n'
@@ -597,7 +597,7 @@ render_templates() {
       CDN_MAP_ENTRY "$cdn_map_entry" CDN_UPSTREAM_BLOCK "$cdn_upstream" DIRECT_DOMAIN "$DIRECT_DOMAIN" VLESS_DIRECT_HOST "$vless_direct_host"
     render_template_file "$TEMPLATE_DIR/gateway/docker-compose.yml.template" \
       "$gateway_dir/docker-compose.yml" \
-      DIRECT_DOMAIN "$DIRECT_DOMAIN" GATEWAY_CONF_PATH "$gateway_dir/nginx.conf" GATEWAY_WWW_PATH "$gateway_dir/www" DOCKER_USER "$TARGET_USER"
+      DIRECT_DOMAIN "$DIRECT_DOMAIN" GATEWAY_CONF_PATH "$gateway_dir/nginx.conf" GATEWAY_WWW_PATH "$gateway_dir/www"
     COMPOSE_OUTPUTS+=("$gateway_dir/docker-compose.yml")
 
     # VLESS direct (Vision + XHTTP Reality)
@@ -608,7 +608,7 @@ render_templates() {
       VISION_CLIENTS "$VISION_CLIENTS" REALITY_CLIENTS "$REALITY_CLIENTS" XHTTP_PATH "$XHTTP_PATH" REALITY_TARGET "$REALITY_TARGET" REALITY_SERVERNAMES "$sni_json" REALITY_PRIVATE_KEY "$reality_priv" REALITY_SHORT_IDS "$sid_json" DIRECT_TLS_CERT "$tls_cert_direct" DIRECT_TLS_KEY "$tls_key_direct" FALLBACK_DEST "gateway:20002"
     render_template_file "$TEMPLATE_DIR/vless-direct/docker-compose.yml.template" \
       "$vless_direct_dir/docker-compose.yml" \
-      VLESS_DIRECT_CONFIG_PATH "$vless_direct_dir/config.json" HOST_SSL_DIR "$SSL_DIR" DOCKER_USER "$TARGET_USER"
+      VLESS_DIRECT_CONFIG_PATH "$vless_direct_dir/config.json" HOST_SSL_DIR "$SSL_DIR"
     COMPOSE_OUTPUTS+=("$vless_direct_dir/docker-compose.yml")
 
     # Hysteria2 (direct)
@@ -621,7 +621,7 @@ render_templates() {
       PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
     render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
       "$hysteria_dir/docker-compose.yml" \
-      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_CONFIG_PATH "$hysteria_dir/config.yaml" HOST_SSL_DIR "$SSL_DIR" DOCKER_USER "$TARGET_USER"
+      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_CONFIG_PATH "$hysteria_dir/config.yaml" HOST_SSL_DIR "$SSL_DIR"
     COMPOSE_OUTPUTS+=("$hysteria_dir/docker-compose.yml")
 
     summary+=$'\n'"Direct stack (no CDN) via $DIRECT_DOMAIN"$'\n'
@@ -643,9 +643,9 @@ render_templates() {
     else
       local health_dir="$STACK_DIR/healthcheck"
       mkdir -p "$health_dir"
-      render_template_file "$TEMPLATE_DIR/healthcheck/docker-compose.yml.template" \
+    render_template_file "$TEMPLATE_DIR/healthcheck/docker-compose.yml.template" \
         "$health_dir/docker-compose.yml" \
-        HEALTHCHECK_URL "$HEALTHCHECK_URL" DOCKER_USER "$TARGET_USER"
+        HEALTHCHECK_URL "$HEALTHCHECK_URL"
       COMPOSE_OUTPUTS+=("$health_dir/docker-compose.yml")
       summary+=$'\n'"Healthcheck: curl $HEALTHCHECK_URL every 5 minutes"$'\n'
     fi

@@ -4,7 +4,6 @@ services:
     image: nbraun1/certbot
     container_name: certbot-renewal
     restart: unless-stopped
-    user: "{{DOCKER_USER}}"
     ports:
       - "80:80"
     volumes:

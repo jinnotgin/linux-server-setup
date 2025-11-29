@@ -4,6 +4,5 @@ services:
     image: curlimages/curl:latest
     container_name: healthcheck-pinger
     restart: unless-stopped
-    user: "{{DOCKER_USER}}"
     command: >
       sh -c "while true; do curl -fsS '{{HEALTHCHECK_URL}}' || true; sleep 300; done"

@@ -4,7 +4,6 @@ services:
     image: teddysun/xray:latest
     container_name: vless-direct
     restart: unless-stopped
-    user: "{{DOCKER_USER}}"
     volumes:
       - {{VLESS_DIRECT_CONFIG_PATH}}:/etc/xray/config.json:ro
       - {{HOST_SSL_DIR}}:/certs:ro

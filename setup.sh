@@ -307,6 +307,28 @@ generate_reality_keys() {
   REALITY_PUBLIC_KEY="$pub"
 }
 
+install_tailscale() {
+  echo "Installing Tailscale and enabling SSH + exit-node advertising..."
+  if ! command -v curl >/dev/null 2>&1; then
+    $SUDO apt-get update -y
+    $SUDO apt-get install -y curl
+  fi
+
+  curl -fsSL https://tailscale.com/install.sh | $SUDO sh
+  $SUDO systemctl enable --now tailscaled
+
+  # Pre-set preferences as requested
+  $SUDO tailscale set --ssh
+  $SUDO tailscale set --advertise-exit-node
+
+  read -r -p "Tailscale auth key (tskey-..., leave blank to skip bringing the node up now): " tailscale_key
+  if [[ -n "$tailscale_key" ]]; then
+    $SUDO tailscale up --auth-key="$tailscale_key" --advertise-exit-node
+  else
+    echo "Skipped 'tailscale up'; run 'sudo tailscale up --auth-key=... --advertise-exit-node' later."
+  fi
+}
+
 ensure_proxy_network() {
   local net="proxy_net"
   if command -v docker >/dev/null 2>&1 && ! docker network inspect "$net" >/dev/null 2>&1; then
@@ -566,8 +588,9 @@ main() {
   read -r -p "Harden SSH/root login? (y/N): " DO_HARDEN
   read -r -p "Install Docker and Portainer? (y/N): " DO_DOCKER
   read -r -p "Configure Portainer backups to Google Drive? (y/N): " DO_BACKUP
+  read -r -p "Install Tailscale with SSH + exit-node enabled? (y/N): " DO_TAILSCALE
 
-  local needs_privileged="${DO_SYSTEM,,}${DO_HARDEN,,}${DO_DOCKER,,}${DO_BACKUP,,}"
+  local needs_privileged="${DO_SYSTEM,,}${DO_HARDEN,,}${DO_DOCKER,,}${DO_BACKUP,,}${DO_TAILSCALE,,}"
   if [[ "$needs_privileged" =~ y ]]; then
     prompt_sudo
   fi
@@ -605,6 +628,10 @@ main() {
   if [[ "$DO_BACKUP" =~ ^[Yy]$ ]]; then
     configure_rclone
     create_backup_artifacts
+  fi
+
+  if [[ "$DO_TAILSCALE" =~ ^[Yy]$ ]]; then
+    install_tailscale
   fi
 
   render_templates

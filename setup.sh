@@ -254,6 +254,52 @@ ensure_proxy_network() {
   fi
 }
 
+seed_nginx_site() {
+  local dest="$GENERATED_DIR/nginx/www"
+  mkdir -p "$dest"
+
+  read -r -p "Download sample 2048 static site into Nginx web root? (y/N): " seed_site
+  if [[ "$seed_site" =~ ^[Yy]$ ]]; then
+    if command -v git >/dev/null 2>&1; then
+      if [[ -n "$(ls -A "$dest" 2>/dev/null)" ]]; then
+        echo "Directory $dest already has content; skipping download."
+      else
+        if git clone https://github.com/jinnotgin/2048.git "$dest"; then
+          echo "Seeded Nginx web root with 2048 static site."
+        else
+          echo "Failed to clone sample site; leave or place your own content in $dest" >&2
+        fi
+      fi
+    else
+      echo "git not found; place your site content under $dest manually." >&2
+    fi
+  else
+    if [[ ! -f "$dest/index.html" ]]; then
+      cat <<'EOF' > "$dest/index.html"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hello</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #0d1117; color: #e6edf3; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .card { background: #161b22; padding: 24px 28px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); text-align: center; width: 420px; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Hello there</h1>
+    <p>This is a placeholder page. Swap in your own files under <code>generated/nginx/www</code> when you're ready.</p>
+  </div>
+</body>
+</html>
+EOF
+    fi
+  fi
+}
+
 render_templates() {
   if [[ ! -d "$TEMPLATE_DIR" ]]; then
     echo "Template directory not found; skipping template rendering."
@@ -288,6 +334,7 @@ render_templates() {
 
   # Render Nginx reverse proxy
   mkdir -p "$GENERATED_DIR/nginx"
+  seed_nginx_site
   render_template_file "$TEMPLATE_DIR/nginx/nginx.conf.template" \
     "$GENERATED_DIR/nginx/nginx.conf" \
     PRIMARY_DOMAIN "$PRIMARY_DOMAIN" TLS_CERT_PATH "$TLS_CERT" TLS_KEY_PATH "$TLS_KEY" VLESS_UPSTREAM "xray-vless-ws:10000"

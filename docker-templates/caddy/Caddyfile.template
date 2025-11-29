@@ -1,0 +1,10 @@
+{{PRIMARY_DOMAIN}}:443 {
+  tls {{TLS_CERT_PATH}} {{TLS_KEY_PATH}}
+  encode gzip
+
+  handle_path /ws* {
+    reverse_proxy {{VLESS_UPSTREAM}}
+  }
+
+  respond "Caddy is running" 200
+}

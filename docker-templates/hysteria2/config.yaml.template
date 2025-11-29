@@ -1,0 +1,19 @@
+listen: :8443
+
+tls:
+  cert: {{TLS_CERT}}
+  key: {{TLS_KEY}}
+
+tcpFastOpen: true
+obfs:
+  type: salamander
+  salamander:
+    password: change-me
+
+users: {{HYSTERIA_USERS}}
+
+masquerade:
+  type: proxy
+  proxy:
+    url: {{MASQUERADE}}
+    rewriteHost: true

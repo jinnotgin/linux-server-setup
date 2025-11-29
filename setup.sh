@@ -597,7 +597,7 @@ render_templates() {
       CDN_MAP_ENTRY "$cdn_map_entry" CDN_UPSTREAM_BLOCK "$cdn_upstream" DIRECT_DOMAIN "$DIRECT_DOMAIN" VLESS_DIRECT_HOST "$vless_direct_host"
     render_template_file "$TEMPLATE_DIR/gateway/docker-compose.yml.template" \
       "$gateway_dir/docker-compose.yml" \
-      DIRECT_DOMAIN "$DIRECT_DOMAIN"
+      DIRECT_DOMAIN "$DIRECT_DOMAIN" GATEWAY_CONF_PATH "$gateway_dir/nginx.conf" GATEWAY_WWW_PATH "$gateway_dir/www"
     COMPOSE_OUTPUTS+=("$gateway_dir/docker-compose.yml")
 
     # VLESS direct (Vision + XHTTP Reality)

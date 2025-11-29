@@ -320,7 +320,9 @@ collect_domains_with_roles() {
     DOMAINS_ARRAY+=("$DIRECT_DOMAIN")
   fi
   DOMAINS_ARGS="${DOMAINS_ARRAY[*]/#/-d }"
+  DOMAINS_CSV="$(IFS=','; echo "${DOMAINS_ARRAY[*]}")"
   PRIMARY_DOMAIN="${CDN_DOMAIN:-$DIRECT_DOMAIN}"
+  CERT_BASE_DOMAIN="${DOMAINS_ARRAY[0]}"
 }
 
 generate_vless_clients() {
@@ -480,18 +482,18 @@ render_templates() {
   fi
 
   local SSL_DIR="$STACK_DIR/ssl"
-  mkdir -p "$SSL_DIR"
+  mkdir -p "$SSL_DIR" "$SSL_DIR/logs"
 
   # Render SSL renewal (covers all selected domains)
   render_template_file "$TEMPLATE_DIR/ssl-renewal/docker-compose.yml.template" \
-    "$STACK_DIR/ssl-renewal.yml" \
-    DOMAINS "$DOMAINS_ARGS" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$STACK_DIR/ssl-logs"
-  COMPOSE_OUTPUTS+=("$STACK_DIR/ssl-renewal.yml")
+    "$STACK_DIR/ssl/docker-compose.yml" \
+    DOMAINS_ARGS "$DOMAINS_ARGS" DOMAINS_CSV "$DOMAINS_CSV" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$SSL_DIR/logs"
+  COMPOSE_OUTPUTS+=("$STACK_DIR/ssl/docker-compose.yml")
 
   # CDN / VLESS over WS (Cloudflare OK)
   if [[ "$render_cdn" =~ ^[Yy]$ ]]; then
-    local tls_cert_cdn="/certs/live/${CDN_DOMAIN}/fullchain.pem"
-    local tls_key_cdn="/certs/live/${CDN_DOMAIN}/privkey.pem"
+    local tls_cert_cdn="/certs/live/${CERT_BASE_DOMAIN}/fullchain.pem"
+    local tls_key_cdn="/certs/live/${CERT_BASE_DOMAIN}/privkey.pem"
     read -r -p "Path to TLS certificate for CDN domain (default inside container: $tls_cert_cdn; host dir: $SSL_DIR): " input_cert
     read -r -p "Path to TLS private key for CDN domain (default inside container: $tls_key_cdn; host dir: $SSL_DIR): " input_key
     tls_cert_cdn=${input_cert:-$tls_cert_cdn}
@@ -533,8 +535,8 @@ render_templates() {
 
   # Direct stack: Hysteria2 + Vision + XHTTP Reality (no CDN)
   if [[ "$render_direct" =~ ^[Yy]$ ]]; then
-    local tls_cert_direct="/certs/live/${DIRECT_DOMAIN}/fullchain.pem"
-    local tls_key_direct="/certs/live/${DIRECT_DOMAIN}/privkey.pem"
+    local tls_cert_direct="/certs/live/${CERT_BASE_DOMAIN}/fullchain.pem"
+    local tls_key_direct="/certs/live/${CERT_BASE_DOMAIN}/privkey.pem"
     read -r -p "Path to TLS certificate for Direct domain (default inside container: $tls_cert_direct; host dir: $SSL_DIR): " input_cert_d
     read -r -p "Path to TLS private key for Direct domain (default inside container: $tls_key_direct; host dir: $SSL_DIR): " input_key_d
     tls_cert_direct=${input_cert_d:-$tls_cert_direct}
@@ -655,8 +657,8 @@ render_templates() {
     echo "Wrote client summary to $summary_file"
   fi
 
-  if [[ -n "${SUDO:-}" && -d "$STACK_DIR" ]]; then
-    $SUDO chown -R "$TARGET_USER:$TARGET_USER" "$STACK_DIR"
+  if [[ -d "$STACK_DIR" ]]; then
+    ${SUDO:-} chown -R "$TARGET_USER:$TARGET_USER" "$STACK_DIR"
   fi
 
   echo "Templates rendered under $STACK_DIR. Update ports/paths as needed and run 'docker compose up -d' inside each directory."

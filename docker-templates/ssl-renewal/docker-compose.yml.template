@@ -1,7 +1,7 @@
 version: "3.9"
 services:
   certbot:
-    image: certbot/certbot:latest
+    image: nbraun1/certbot
     container_name: certbot-renewal
     restart: unless-stopped
     ports:
@@ -9,9 +9,7 @@ services:
     volumes:
       - {{HOST_SSL_DIR}}:/etc/letsencrypt
       - {{SSL_LOG_DIR}}:/var/log/letsencrypt
-    command: >
-      sh -c "trap exit TERM; while :; do
-      certbot certonly --standalone --agree-tos --preferred-challenges http -n --email {{CERT_EMAIL}} {{DOMAINS}} --keep-until-expiring;
-      certbot renew --standalone --keep-until-expiring;
-      sleep 12h;
-      done"
+    environment:
+      EMAIL: {{CERT_EMAIL}}
+      DOMAINS: {{DOMAINS_CSV}}
+      CRON: "0 0,12 * * *"

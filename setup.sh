@@ -485,7 +485,7 @@ render_templates() {
   mkdir -p "$SSL_DIR" "$SSL_DIR/logs"
 
   # Render SSL renewal (covers all selected domains)
-  render_template_file "$TEMPLATE_DIR/ssl-renewal/docker-compose.yml.template" \
+  render_template_file "$TEMPLATE_DIR/ssl/docker-compose.yml.template" \
     "$STACK_DIR/ssl/docker-compose.yml" \
     DOMAINS_ARGS "$DOMAINS_ARGS" DOMAINS_CSV "$DOMAINS_CSV" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$SSL_DIR/logs" DOCKER_USER "$TARGET_USER"
   COMPOSE_OUTPUTS+=("$STACK_DIR/ssl/docker-compose.yml")

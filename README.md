@@ -55,7 +55,7 @@ After rendering, you can let the script start the generated stacks automatically
 - The Certbot stack binds port 80; ensure it is free when you run it. The gateway binds public port 443. If both CDN + Direct are enabled, the CDN Nginx listens on 6443 internally while the gateway handles 443.
 - Keep the CDN domain behind Cloudflare only for VLESS+WS. The Direct domain must not sit behind a CDN for Vision/XHTTP Reality/Hysteria2 to work.
 - Before starting the Nginx or VLESS stacks, create the shared Docker network with `docker network create proxy_net` (the script will also create it automatically if Docker is available when you choose to auto-start stacks).
-- Hysteria2 uses a generated password; update it in `~/server-stacks/hysteria2/config.yaml` if you want a custom value.
+- Hysteria2 uses a generated password; update it in `~/server-stacks/hysteria2/server.yaml` if you want a custom value.
 - Templates and SSL material are rendered under the selected user's home directory (`~/server-stacks` with `~/server-stacks/ssl` for certs) with user ownership. Compose files use absolute paths into that folder.
 - A summary of client-facing details is written to `~/server-stacks/summary.txt` after rendering.
 

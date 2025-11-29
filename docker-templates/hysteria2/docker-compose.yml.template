@@ -1,13 +1,13 @@
 version: "3.9"
 services:
   hysteria2:
-    image: ghcr.io/apernet/hysteria:latest
+    image: tobyxdd/hysteria:latest
     container_name: hysteria2
     restart: unless-stopped
     ports:
       - "8443:8443/udp"
       - "8443:8443/tcp"
     volumes:
-      - {{HYSTERIA_CONFIG_PATH}}:/etc/hysteria/config.yaml:ro
+      - {{HYSTERIA_CONFIG_PATH}}:/etc/hysteria.yaml:ro
       - {{HOST_SSL_DIR}}:/certs:ro
-    command: ["-c", "/etc/hysteria/config.yaml"]
+    command: ["server", "-c", "/etc/hysteria.yaml"]

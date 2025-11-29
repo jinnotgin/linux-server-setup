@@ -644,12 +644,12 @@ render_templates() {
     mkdir -p "$hysteria_dir"
     read -r -p "Masquerade site for Hysteria2 (default: https://news.ycombinator.com): " MASQ
     MASQ=${MASQ:-https://news.ycombinator.com}
-    render_template_file "$TEMPLATE_DIR/hysteria2/config.yaml.template" \
-      "$hysteria_dir/config.yaml" \
+    render_template_file "$TEMPLATE_DIR/hysteria2/server.yaml.template" \
+      "$hysteria_dir/server.yaml" \
       PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
     render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
       "$hysteria_dir/docker-compose.yml" \
-      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_CONFIG_PATH "$hysteria_dir/config.yaml" HOST_SSL_DIR "$SSL_DIR"
+      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_CONFIG_PATH "$hysteria_dir/hysteria.yaml" HOST_SSL_DIR "$SSL_DIR"
     COMPOSE_OUTPUTS+=("$hysteria_dir/docker-compose.yml")
 
     summary+=$'\n'"Direct stack (no CDN) via $DIRECT_DOMAIN"$'\n'

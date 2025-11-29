@@ -8,6 +8,12 @@ auth:
   type: password
   password: {{HYSTERIA_PASSWORD}}
 
+resolver:
+  type: https
+  https:
+    addr: 8.8.8.8:443
+    timeout: 10s
+
 masquerade:
   type: proxy
   proxy:

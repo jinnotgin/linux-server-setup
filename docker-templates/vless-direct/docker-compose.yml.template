@@ -5,8 +5,8 @@ services:
     container_name: vless-direct
     restart: unless-stopped
     volumes:
-      - ./config.json:/etc/xray/config.json:ro
-      - ./certs:/certs:ro
+      - {{VLESS_DIRECT_CONFIG_PATH}}:/etc/xray/config.json:ro
+      - {{HOST_SSL_DIR}}:/certs:ro
     networks:
       - proxy_net
     command: ["xray", "run", "-config", "/etc/xray/config.json"]

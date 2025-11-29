@@ -8,6 +8,6 @@ services:
       - "8443:8443/udp"
       - "8443:8443/tcp"
     volumes:
-      - ./config.yaml:/etc/hysteria/config.yaml:ro
-      - ./certs:/certs:ro
+      - {{HYSTERIA_CONFIG_PATH}}:/etc/hysteria/config.yaml:ro
+      - {{HOST_SSL_DIR}}:/certs:ro
     command: ["-c", "/etc/hysteria/config.yaml"]

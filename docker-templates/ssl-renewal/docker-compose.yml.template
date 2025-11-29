@@ -7,8 +7,8 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./certs:/etc/letsencrypt
-      - ./logs:/var/log/letsencrypt
+      - {{HOST_SSL_DIR}}:/etc/letsencrypt
+      - {{SSL_LOG_DIR}}:/var/log/letsencrypt
     command: >
       sh -c "trap exit TERM; while :; do
       certbot certonly --standalone --agree-tos --preferred-challenges http -n --email {{CERT_EMAIL}} {{DOMAINS}} --keep-until-expiring;

@@ -12,7 +12,7 @@ TARGET_USER="$(whoami)"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/docker-templates"
-GENERATED_DIR="" # set later based on TARGET_USER home
+STACK_DIR="" # set later based on TARGET_USER home
 BACKUP_DIR="/opt/portainer/backups"
 RCLONE_REMOTE="portainer_gdrive"
 COMPOSE_OUTPUTS=()
@@ -120,6 +120,14 @@ PY
     cat /proc/sys/kernel/random/uuid
   else
     echo "ffffffff-ffff-4fff-afff-$(printf '%012x' $RANDOM)"  # last-resort
+  fi
+}
+
+gen_short_id() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 4
+  else
+    printf '%08x' "$RANDOM$RANDOM"
   fi
 }
 
@@ -247,14 +255,22 @@ EOS
 render_template_file() {
   local src="$1" dest="$2"
   shift 2
-  local content
-  content="$(cat "$src")"
-  while [[ $# -gt 0 ]]; do
-    local key="$1"; shift
-    local value="$1"; shift
-    content="${content//{{$key}}/$value}"
-  done
-  printf "%s" "$content" > "$dest"
+  if (( $# % 2 != 0 )); then
+    echo "render_template_file received an odd number of key/value args" >&2
+    return 1
+  fi
+  python3 - "$src" "$dest" "$@" <<'PY'
+import sys
+src, dest, *pairs = sys.argv[1:]
+data = open(src, encoding="utf-8").read()
+if len(pairs) % 2:
+    sys.exit("Odd number of key/value args")
+for i in range(0, len(pairs), 2):
+    key, val = pairs[i], pairs[i+1]
+    data = data.replace(f"{{{{{key}}}}}", val)
+with open(dest, "w", encoding="utf-8") as f:
+    f.write(data)
+PY
 }
 
 collect_domains_with_roles() {
@@ -441,8 +457,8 @@ render_templates() {
 
   local USER_HOME
   USER_HOME=$(eval echo "~$TARGET_USER")
-  GENERATED_DIR="$USER_HOME/generated"
-  mkdir -p "$GENERATED_DIR"
+  STACK_DIR="$USER_HOME/server-stacks"
+  mkdir -p "$STACK_DIR"
   echo "Collecting domain information (supports multiple domains)..."
   collect_domains_with_roles
   read -r -p "Contact email for certificates (used by Certbot/Nginx): " CERT_EMAIL
@@ -463,45 +479,50 @@ render_templates() {
     return
   fi
 
+  local SSL_DIR="$STACK_DIR/ssl"
+  mkdir -p "$SSL_DIR"
+
   # Render SSL renewal (covers all selected domains)
   render_template_file "$TEMPLATE_DIR/ssl-renewal/docker-compose.yml.template" \
-    "$GENERATED_DIR/ssl-renewal.yml" \
-    DOMAINS "$DOMAINS_ARGS" CERT_EMAIL "$CERT_EMAIL"
-  COMPOSE_OUTPUTS+=("$GENERATED_DIR/ssl-renewal.yml")
+    "$STACK_DIR/ssl-renewal.yml" \
+    DOMAINS "$DOMAINS_ARGS" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$STACK_DIR/ssl-logs"
+  COMPOSE_OUTPUTS+=("$STACK_DIR/ssl-renewal.yml")
 
   # CDN / VLESS over WS (Cloudflare OK)
   if [[ "$render_cdn" =~ ^[Yy]$ ]]; then
     local tls_cert_cdn="/certs/live/${CDN_DOMAIN}/fullchain.pem"
     local tls_key_cdn="/certs/live/${CDN_DOMAIN}/privkey.pem"
-    read -r -p "Path to TLS certificate for CDN domain (default: $tls_cert_cdn): " input_cert
-    read -r -p "Path to TLS private key for CDN domain (default: $tls_key_cdn): " input_key
+    read -r -p "Path to TLS certificate for CDN domain (default inside container: $tls_cert_cdn; host dir: $SSL_DIR): " input_cert
+    read -r -p "Path to TLS private key for CDN domain (default inside container: $tls_key_cdn; host dir: $SSL_DIR): " input_key
     tls_cert_cdn=${input_cert:-$tls_cert_cdn}
     tls_key_cdn=${input_key:-$tls_key_cdn}
 
     generate_vless_clients "VLESS over WebSocket" "" VLESS_WS_CLIENTS VLESS_WS_IDS
-    mkdir -p "$GENERATED_DIR/nginx" "$GENERATED_DIR/vless-cdn"
+    local nginx_dir="$STACK_DIR/nginx"
+    local vless_cdn_dir="$STACK_DIR/vless-cdn"
+    mkdir -p "$nginx_dir" "$vless_cdn_dir"
 
     local nginx_port="443"
     if [[ "$render_direct" =~ ^[Yy]$ ]]; then
       nginx_port="6443"
     fi
 
-    seed_nginx_site "$GENERATED_DIR/nginx/www"
+    seed_nginx_site "$nginx_dir/www"
     render_template_file "$TEMPLATE_DIR/nginx/nginx.conf.template" \
-      "$GENERATED_DIR/nginx/nginx.conf" \
+      "$nginx_dir/nginx.conf" \
       PRIMARY_DOMAIN "$CDN_DOMAIN" TLS_CERT_PATH "$tls_cert_cdn" TLS_KEY_PATH "$tls_key_cdn" VLESS_UPSTREAM "vless-cdn:10000" NGINX_HTTPS_PORT "$nginx_port"
     render_template_file "$TEMPLATE_DIR/nginx/docker-compose.yml.template" \
-      "$GENERATED_DIR/nginx/docker-compose.yml" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" NGINX_HTTPS_PORT "$nginx_port"
-    COMPOSE_OUTPUTS+=("$GENERATED_DIR/nginx/docker-compose.yml")
+      "$nginx_dir/docker-compose.yml" \
+      PRIMARY_DOMAIN "$CDN_DOMAIN" NGINX_HTTPS_PORT "$nginx_port" NGINX_CONF_PATH "$nginx_dir/nginx.conf" NGINX_WWW_PATH "$nginx_dir/www" HOST_SSL_DIR "$SSL_DIR"
+    COMPOSE_OUTPUTS+=("$nginx_dir/docker-compose.yml")
 
     render_template_file "$TEMPLATE_DIR/vless-cdn/config.json.template" \
-      "$GENERATED_DIR/vless-cdn/config.json" \
+      "$vless_cdn_dir/config.json" \
       PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CLIENTS "$VLESS_WS_CLIENTS"
     render_template_file "$TEMPLATE_DIR/vless-cdn/docker-compose.yml.template" \
-      "$GENERATED_DIR/vless-cdn/docker-compose.yml" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN"
-    COMPOSE_OUTPUTS+=("$GENERATED_DIR/vless-cdn/docker-compose.yml")
+      "$vless_cdn_dir/docker-compose.yml" \
+      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CDN_CONFIG_PATH "$vless_cdn_dir/config.json"
+    COMPOSE_OUTPUTS+=("$vless_cdn_dir/docker-compose.yml")
 
     summary+=$'\n'"CDN VLESS over WebSocket (via $CDN_DOMAIN)"$'\n'
     summary+="  External: https://$CDN_DOMAIN:443/ws (Cloudflare OK)"$'\n'
@@ -514,8 +535,8 @@ render_templates() {
   if [[ "$render_direct" =~ ^[Yy]$ ]]; then
     local tls_cert_direct="/certs/live/${DIRECT_DOMAIN}/fullchain.pem"
     local tls_key_direct="/certs/live/${DIRECT_DOMAIN}/privkey.pem"
-    read -r -p "Path to TLS certificate for Direct domain (default: $tls_cert_direct): " input_cert_d
-    read -r -p "Path to TLS private key for Direct domain (default: $tls_key_direct): " input_key_d
+    read -r -p "Path to TLS certificate for Direct domain (default inside container: $tls_cert_direct; host dir: $SSL_DIR): " input_cert_d
+    read -r -p "Path to TLS private key for Direct domain (default inside container: $tls_key_direct; host dir: $SSL_DIR): " input_key_d
     tls_cert_direct=${input_cert_d:-$tls_cert_direct}
     tls_key_direct=${input_key_d:-$tls_key_direct}
 
@@ -536,11 +557,13 @@ render_templates() {
     done
     sni_json="${sni_json%,}]"
 
-    read -r -p "Reality short IDs (comma-separated, include empty entry to allow blank, default: ,0123456789abcdef): " REALITY_SHORT_INPUT
-    REALITY_SHORT_INPUT=${REALITY_SHORT_INPUT:-,0123456789abcdef}
-    IFS=',' read -r -a sid_arr <<< "$REALITY_SHORT_INPUT"
+    read -r -p "How many Reality short IDs to auto-generate? (default: 2) " REALITY_SHORT_COUNT
+    REALITY_SHORT_COUNT=${REALITY_SHORT_COUNT:-2}
     local sid_json="["
-    for sid in "${sid_arr[@]}"; do
+    REALITY_SHORT_LIST=()
+    for ((i=1; i<=REALITY_SHORT_COUNT; i++)); do
+      sid=$(gen_short_id)
+      REALITY_SHORT_LIST+=("$sid")
       sid_json+="\"${sid}\","
     done
     sid_json="${sid_json%,}]"
@@ -553,8 +576,9 @@ render_templates() {
     reality_pub=${input_pub:-$REALITY_PUBLIC_KEY}
 
     # Gateway for SNI routing + fallback site
-    mkdir -p "$GENERATED_DIR/gateway"
-    seed_nginx_site "$GENERATED_DIR/gateway/www"
+    local gateway_dir="$STACK_DIR/gateway"
+    mkdir -p "$gateway_dir"
+    seed_nginx_site "$gateway_dir/www"
 
     local cdn_map_entry="# CDN domain not configured"
     local cdn_upstream="# No CDN upstream configured"
@@ -567,40 +591,43 @@ render_templates() {
     fi
 
     render_template_file "$TEMPLATE_DIR/gateway/nginx.conf.template" \
-      "$GENERATED_DIR/gateway/nginx.conf" \
+      "$gateway_dir/nginx.conf" \
       CDN_MAP_ENTRY "$cdn_map_entry" CDN_UPSTREAM_BLOCK "$cdn_upstream" DIRECT_DOMAIN "$DIRECT_DOMAIN" VLESS_DIRECT_HOST "$vless_direct_host"
     render_template_file "$TEMPLATE_DIR/gateway/docker-compose.yml.template" \
-      "$GENERATED_DIR/gateway/docker-compose.yml" \
+      "$gateway_dir/docker-compose.yml" \
       DIRECT_DOMAIN "$DIRECT_DOMAIN"
-    COMPOSE_OUTPUTS+=("$GENERATED_DIR/gateway/docker-compose.yml")
+    COMPOSE_OUTPUTS+=("$gateway_dir/docker-compose.yml")
 
     # VLESS direct (Vision + XHTTP Reality)
-    mkdir -p "$GENERATED_DIR/vless-direct"
+    local vless_direct_dir="$STACK_DIR/vless-direct"
+    mkdir -p "$vless_direct_dir"
     render_template_file "$TEMPLATE_DIR/vless-direct/config.json.template" \
-      "$GENERATED_DIR/vless-direct/config.json" \
+      "$vless_direct_dir/config.json" \
       VISION_CLIENTS "$VISION_CLIENTS" REALITY_CLIENTS "$REALITY_CLIENTS" XHTTP_PATH "$XHTTP_PATH" REALITY_TARGET "$REALITY_TARGET" REALITY_SERVERNAMES "$sni_json" REALITY_PRIVATE_KEY "$reality_priv" REALITY_SHORT_IDS "$sid_json" DIRECT_TLS_CERT "$tls_cert_direct" DIRECT_TLS_KEY "$tls_key_direct" FALLBACK_DEST "gateway:20002"
     render_template_file "$TEMPLATE_DIR/vless-direct/docker-compose.yml.template" \
-      "$GENERATED_DIR/vless-direct/docker-compose.yml"
-    COMPOSE_OUTPUTS+=("$GENERATED_DIR/vless-direct/docker-compose.yml")
+      "$vless_direct_dir/docker-compose.yml" \
+      VLESS_DIRECT_CONFIG_PATH "$vless_direct_dir/config.json" HOST_SSL_DIR "$SSL_DIR"
+    COMPOSE_OUTPUTS+=("$vless_direct_dir/docker-compose.yml")
 
     # Hysteria2 (direct)
-    mkdir -p "$GENERATED_DIR/hysteria2"
+    local hysteria_dir="$STACK_DIR/hysteria2"
+    mkdir -p "$hysteria_dir"
     read -r -p "Masquerade site for Hysteria2 (default: https://news.ycombinator.com): " MASQ
     MASQ=${MASQ:-https://news.ycombinator.com}
     render_template_file "$TEMPLATE_DIR/hysteria2/config.yaml.template" \
-      "$GENERATED_DIR/hysteria2/config.yaml" \
+      "$hysteria_dir/config.yaml" \
       PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
     render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
-      "$GENERATED_DIR/hysteria2/docker-compose.yml" \
-      PRIMARY_DOMAIN "$DIRECT_DOMAIN"
-    COMPOSE_OUTPUTS+=("$GENERATED_DIR/hysteria2/docker-compose.yml")
+      "$hysteria_dir/docker-compose.yml" \
+      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_CONFIG_PATH "$hysteria_dir/config.yaml" HOST_SSL_DIR "$SSL_DIR"
+    COMPOSE_OUTPUTS+=("$hysteria_dir/docker-compose.yml")
 
     summary+=$'\n'"Direct stack (no CDN) via $DIRECT_DOMAIN"$'\n'
     summary+="  VLESS Vision (XTLS) on 443 SNI=$DIRECT_DOMAIN, UUIDs: $VISION_IDS"$'\n'
     summary+="  VLESS XHTTP Reality on 443 path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
     summary+="    SNI: $REALITY_SNI_INPUT"$'\n'
     summary+="    Public key: $reality_pub"$'\n'
-    summary+="    Short IDs: $REALITY_SHORT_INPUT"$'\n'
+    summary+="    Short IDs: $(IFS=', '; echo "${REALITY_SHORT_LIST[*]}")"$'\n'
     summary+="    UUIDs: $REALITY_IDS"$'\n'
     summary+="  Hysteria2 on 8443 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
     summary+="  TLS cert/key: $tls_cert_direct | $tls_key_direct"$'\n'
@@ -612,26 +639,27 @@ render_templates() {
     if [[ -z "$HEALTHCHECK_URL" ]]; then
       echo "Healthcheck URL is required when enabling the pinger." >&2
     else
-      mkdir -p "$GENERATED_DIR/healthcheck"
+      local health_dir="$STACK_DIR/healthcheck"
+      mkdir -p "$health_dir"
       render_template_file "$TEMPLATE_DIR/healthcheck/docker-compose.yml.template" \
-        "$GENERATED_DIR/healthcheck/docker-compose.yml" \
+        "$health_dir/docker-compose.yml" \
         HEALTHCHECK_URL "$HEALTHCHECK_URL"
-      COMPOSE_OUTPUTS+=("$GENERATED_DIR/healthcheck/docker-compose.yml")
+      COMPOSE_OUTPUTS+=("$health_dir/docker-compose.yml")
       summary+=$'\n'"Healthcheck: curl $HEALTHCHECK_URL every 5 minutes"$'\n'
     fi
   fi
 
   if [[ -n "$summary" ]]; then
-    local summary_file="$GENERATED_DIR/summary.txt"
+    local summary_file="$STACK_DIR/summary.txt"
     printf "%s\n" "$summary" > "$summary_file"
     echo "Wrote client summary to $summary_file"
   fi
 
-  if [[ -n "${SUDO:-}" && -d "$GENERATED_DIR" ]]; then
-    $SUDO chown -R "$TARGET_USER:$TARGET_USER" "$GENERATED_DIR"
+  if [[ -n "${SUDO:-}" && -d "$STACK_DIR" ]]; then
+    $SUDO chown -R "$TARGET_USER:$TARGET_USER" "$STACK_DIR"
   fi
 
-  echo "Templates rendered under $GENERATED_DIR. Update ports/paths as needed and run 'docker compose up -d' inside each directory."
+  echo "Templates rendered under $STACK_DIR. Update ports/paths as needed and run 'docker compose up -d' inside each directory."
 }
 
 main() {

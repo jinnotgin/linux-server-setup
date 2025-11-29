@@ -646,8 +646,7 @@ render_templates() {
     summary+="  VLESS XHTTP Reality on 443 path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
     summary+="    SNI: $REALITY_SNI_INPUT"$'\n'
     if [[ "$reality_pub" == "REPLACE_WITH_PUBLIC_KEY" ]]; then
-      summary+="    Public key: NOT GENERATED (install docker/xray and run 'docker run --rm teddysun/xray:latest xray x25519')"$
-'\n'
+      summary+="    Public key: NOT GENERATED (install docker/xray and run 'docker run --rm teddysun/xray:latest xray x25519')"$'\n'
     else
       summary+="    Public key: $reality_pub"$'\n'
     fi

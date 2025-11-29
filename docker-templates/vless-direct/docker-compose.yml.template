@@ -1,7 +1,7 @@
 version: "3.9"
 services:
   vless-direct:
-    image: teddysun/xray:latest
+    image: ghcr.io/xtls/xray-core:latest
     container_name: vless-direct
     restart: unless-stopped
     volumes:
@@ -9,7 +9,7 @@ services:
       - {{HOST_SSL_DIR}}:/certs:ro
     networks:
       - proxy_net
-    command: ["xray", "run", "-config", "/etc/xray/config.json"]
+    command: ["run", "-config", "/etc/xray/config.json"]
 
 networks:
   proxy_net:

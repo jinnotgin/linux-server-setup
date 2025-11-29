@@ -353,43 +353,36 @@ generate_reality_keys() {
   local priv="" pub=""
   REALITY_HAS_KEYS=false
 
-  # helper: run a command that outputs x25519 keys and parse Private/Public (handles "PrivateKey" or "Private key")
+  # helper: run a command that outputs x25519 keys and parse fields (newer Xray uses Password as public key)
   parse_keys() {
     local output="$1" p pb
     p=$(echo "$output" | awk -F': *' '/PrivateKey|Private key/ {print $2; exit}')
-    pb=$(echo "$output" | awk -F': *' '/PublicKey|Public key/ {print $2; exit}')
+    pb=$(echo "$output" | awk -F': *' '/PublicKey|Public key|Password/ {print $2; exit}')
     echo "$p" "$pb"
   }
 
   # Try docker-based xray
   if command -v docker >/dev/null 2>&1; then
-    if output=$(docker run --rm teddysun/xray:latest xray x25519 2>/dev/null); then
+    # Newer images support bare `x25519`; fall back to `xray x25519`
+    if output=$(docker run --rm ghcr.io/xtls/xray-core:latest x25519 2>/dev/null); then
       read -r priv pub <<<"$(parse_keys "$output")"
-      if [[ -n "$priv" && -z "$pub" ]]; then
-        pub=$(docker run --rm teddysun/xray:latest xray x25519 -i "$priv" 2>/dev/null | awk -F': *' '/PublicKey|Public key/ {print $2; exit}')
+    elif output=$(docker run --rm ghcr.io/xtls/xray-core:latest xray x25519 2>/dev/null); then
+      read -r priv pub <<<"$(parse_keys "$output")"
+    fi
+    if [[ -n "$priv" && -z "$pub" ]]; then
+      pub=$(docker run --rm ghcr.io/xtls/xray-core:latest x25519 -i "$priv" 2>/dev/null | awk -F': *' '/PublicKey|Public key|Password/ {print $2; exit}')
+      if [[ -z "$pub" ]]; then
+        pub=$(docker run --rm ghcr.io/xtls/xray-core:latest xray x25519 -i "$priv" 2>/dev/null | awk -F': *' '/PublicKey|Public key|Password/ {print $2; exit}')
       fi
-      if [[ -n "$priv" && -n "$pub" ]]; then
-        REALITY_HAS_KEYS=true
-      fi
+    fi
+    if [[ -n "$priv" && -n "$pub" ]]; then
+      REALITY_HAS_KEYS=true
     fi
   fi
 
   if [[ $REALITY_HAS_KEYS == false ]]; then
-    if command -v openssl >/dev/null 2>&1; then
-      local tmpdir
-      tmpdir=$(mktemp -d)
-      if openssl genpkey -algorithm X25519 -out "$tmpdir/x25519-priv.pem" >/dev/null 2>&1; then
-        openssl pkey -in "$tmpdir/x25519-priv.pem" -pubout -out "$tmpdir/x25519-pub.pem" >/dev/null 2>&1 || true
-        priv=$(openssl pkey -in "$tmpdir/x25519-priv.pem" -outform DER 2>/dev/null | base64 -w0 2>/dev/null)
-        pub=$(openssl pkey -in "$tmpdir/x25519-pub.pem" -pubin -outform DER 2>/dev/null | base64 -w0 2>/dev/null)
-      fi
-      rm -rf "$tmpdir"
-      priv=${priv:-"REPLACE_WITH_PRIVATE_KEY"}
-      pub=${pub:-"REPLACE_WITH_PUBLIC_KEY"}
-    else
-      priv="REPLACE_WITH_PRIVATE_KEY"
-      pub="REPLACE_WITH_PUBLIC_KEY"
-    fi
+    priv=${priv:-"REPLACE_WITH_PRIVATE_KEY"}
+    pub=${pub:-"REPLACE_WITH_PUBLIC_KEY"}
   fi
 
   REALITY_PRIVATE_KEY="$priv"
@@ -486,6 +479,9 @@ render_templates() {
   USER_HOME=$(eval echo "~$TARGET_USER")
   STACK_DIR="$USER_HOME/server-stacks"
   mkdir -p "$STACK_DIR"
+  local TARGET_UID TARGET_GID
+  TARGET_UID=$(id -u "$TARGET_USER" 2>/dev/null || id -u)
+  TARGET_GID=$(id -g "$TARGET_USER" 2>/dev/null || id -g)
   echo "Collecting domain information (supports multiple domains)..."
   collect_domains_with_roles
   read -r -p "Contact email for certificates (used by Certbot/Nginx): " CERT_EMAIL
@@ -511,9 +507,9 @@ render_templates() {
   mkdir -p "$SSL_DIR" "$SSL_DIR/logs"
 
   # Render SSL renewal (covers all selected domains)
- render_template_file "$TEMPLATE_DIR/ssl/docker-compose.yml.template" \
+  render_template_file "$TEMPLATE_DIR/ssl/docker-compose.yml.template" \
     "$STACK_DIR/ssl/docker-compose.yml" \
-    DOMAINS_ARGS "$DOMAINS_ARGS" DOMAINS_CSV "$DOMAINS_CSV" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$SSL_DIR/logs"
+    DOMAINS_ARGS "$DOMAINS_ARGS" DOMAINS_CSV "$DOMAINS_CSV" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$SSL_DIR/logs" TARGET_UID "$TARGET_UID" TARGET_GID "$TARGET_GID"
   COMPOSE_OUTPUTS+=("$STACK_DIR/ssl/docker-compose.yml")
 
   # CDN / VLESS over WS (Cloudflare OK)
@@ -644,8 +640,8 @@ render_templates() {
     mkdir -p "$hysteria_dir"
     read -r -p "Masquerade site for Hysteria2 (default: https://news.ycombinator.com): " MASQ
     MASQ=${MASQ:-https://news.ycombinator.com}
-    render_template_file "$TEMPLATE_DIR/hysteria2/server.yaml.template" \
-      "$hysteria_dir/server.yaml" \
+    render_template_file "$TEMPLATE_DIR/hysteria2/hysteria.yaml.template" \
+      "$hysteria_dir/hysteria.yaml" \
       PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
     render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
       "$hysteria_dir/docker-compose.yml" \
@@ -657,9 +653,9 @@ render_templates() {
     summary+="  VLESS XHTTP Reality on 443 path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
     summary+="    SNI: $REALITY_SNI_INPUT"$'\n'
     if [[ "$reality_pub" == "REPLACE_WITH_PUBLIC_KEY" ]]; then
-      summary+="    Public key: NOT GENERATED (install docker and run 'docker run --rm teddysun/xray:latest xray x25519')"$'\n'
+      summary+="    Public key (Xray prints this as 'Password'): NOT GENERATED (install docker and run 'docker run --rm ghcr.io/xtls/xray-core:latest x25519')"$'\n'
     else
-      summary+="    Public key: $reality_pub"$'\n'
+      summary+="    Public key (Xray prints this as 'Password'): $reality_pub"$'\n'
     fi
     summary+="    Short IDs: $(IFS=', '; echo "${REALITY_SHORT_LIST[*]}")"$'\n'
     summary+="    UUIDs: $REALITY_IDS"$'\n'

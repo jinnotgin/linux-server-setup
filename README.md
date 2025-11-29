@@ -40,9 +40,9 @@ See [`docs/portainer-backup.md`](docs/portainer-backup.md) for details on how th
 - The script renders stacks under `~/server-stacks` with user ownership:
   - **ssl**: `nbraun1/certbot` with cron renewal; certs/logs live in `~/server-stacks/ssl` (mounted as `/etc/letsencrypt`), binds port 80.
   - **cdn-proxy (Nginx)**: reverse proxy for the CDN domain using certs from `~/server-stacks/ssl` (mounted as `/certs`), proxies `/ws` to VLESS WS over `proxy_net`; if both CDN + Direct are enabled it listens on 6443 internally while the gateway holds 443.
-  - **vless-cdn**: `teddysun/xray` serving VLESS over WebSocket (TLS offloaded at `cdn-proxy`); multiple UUID clients supported.
+  - **vless-cdn**: `ghcr.io/xtls/xray-core:latest` serving VLESS over WebSocket (TLS offloaded at `cdn-proxy`); multiple UUID clients supported.
   - **gateway**: Nginx stream router on 443 SNI-routing to CDN (vless-cdn), Direct Vision, and XHTTP Reality; serves the Vision fallback site on 20002.
-  - **vless-direct**: `teddysun/xray` with VLESS Vision (XTLS) + VLESS XHTTP Reality, using the Direct domain cert from `/certs`.
+  - **vless-direct**: `ghcr.io/xtls/xray-core:latest` with VLESS Vision (XTLS) + VLESS XHTTP Reality, using the Direct domain cert from `/certs`.
   - **hysteria2**: single-password Hysteria2 using the Direct domain cert; masquerade target configurable.
   - **healthcheck**: tiny curl container that pings a user URL every 5 minutes (healthchecks.io-friendly).
   - **copyparty**: file server with configurable credentials and data path; config in `~/server-stacks/copyparty/cfg`, default port 3923.

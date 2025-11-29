@@ -1,14 +1,14 @@
 version: "3.9"
 services:
   vless-cdn:
-    image: teddysun/xray:latest
+    image: ghcr.io/xtls/xray-core:latest
     container_name: vless-cdn
     restart: unless-stopped
     volumes:
       - {{VLESS_CDN_CONFIG_PATH}}:/etc/xray/config.json:ro
     networks:
       - proxy_net
-    command: ["xray", "run", "-config", "/etc/xray/config.json"]
+    command: ["run", "-config", "/etc/xray/config.json"]
 
 networks:
   proxy_net:

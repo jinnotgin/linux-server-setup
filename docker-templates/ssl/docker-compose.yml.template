@@ -13,3 +13,5 @@ services:
       EMAIL: {{CERT_EMAIL}}
       DOMAINS: {{DOMAINS_CSV}}
       CRON: "0 0,12 * * *"
+      # run once per successfully issued/renewed cert:
+      DEPLOY_HOOK_CMD: "chown -R {{TARGET_UID}}:{{TARGET_GID}} /etc/letsencrypt /var/log/letsencrypt"

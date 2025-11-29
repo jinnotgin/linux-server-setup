@@ -350,15 +350,30 @@ generate_hysteria_password() {
 }
 
 generate_reality_keys() {
-  local priv pub
+  local priv="" pub=""
+  REALITY_HAS_KEYS=false
+
   if command -v docker >/dev/null 2>&1; then
     if output=$(docker run --rm teddysun/xray:latest xray x25519 2>/dev/null); then
       priv=$(echo "$output" | awk '/Private key/ {print $3}')
       pub=$(echo "$output" | awk '/Public key/ {print $3}')
+      if [[ -n "$priv" && -n "$pub" ]]; then
+        REALITY_HAS_KEYS=true
+      fi
     fi
   fi
 
-  if [[ -z "$priv" || -z "$pub" ]]; then
+  if [[ $REALITY_HAS_KEYS == false && -x /usr/local/bin/xray ]]; then
+    if output=$(/usr/local/bin/xray x25519 2>/dev/null); then
+      priv=$(echo "$output" | awk '/Private key/ {print $3}')
+      pub=$(echo "$output" | awk '/Public key/ {print $3}')
+      if [[ -n "$priv" && -n "$pub" ]]; then
+        REALITY_HAS_KEYS=true
+      fi
+    fi
+  fi
+
+  if [[ $REALITY_HAS_KEYS == false ]]; then
     if command -v openssl >/dev/null 2>&1; then
       priv=$(openssl rand -hex 32)
     else
@@ -576,6 +591,8 @@ render_templates() {
     local reality_priv reality_pub
     reality_priv=${input_priv:-$REALITY_PRIVATE_KEY}
     reality_pub=${input_pub:-$REALITY_PUBLIC_KEY}
+    local reality_keys_file="$STACK_DIR/reality-keys.txt"
+    printf "Reality private key: %s\nReality public key: %s\n" "$reality_priv" "$reality_pub" > "$reality_keys_file"
 
     # Gateway for SNI routing + fallback site
     local gateway_dir="$STACK_DIR/gateway"
@@ -628,7 +645,12 @@ render_templates() {
     summary+="  VLESS Vision (XTLS) on 443 SNI=$DIRECT_DOMAIN, UUIDs: $VISION_IDS"$'\n'
     summary+="  VLESS XHTTP Reality on 443 path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
     summary+="    SNI: $REALITY_SNI_INPUT"$'\n'
-    summary+="    Public key: $reality_pub"$'\n'
+    if [[ "$reality_pub" == "REPLACE_WITH_PUBLIC_KEY" ]]; then
+      summary+="    Public key: NOT GENERATED (install docker/xray and run 'docker run --rm teddysun/xray:latest xray x25519')"$
+'\n'
+    else
+      summary+="    Public key: $reality_pub"$'\n'
+    fi
     summary+="    Short IDs: $(IFS=', '; echo "${REALITY_SHORT_LIST[*]}")"$'\n'
     summary+="    UUIDs: $REALITY_IDS"$'\n'
     summary+="  Hysteria2 on 8443 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'

@@ -314,10 +314,8 @@ generate_vless_clients() {
   [[ -z "$count" ]] && count=1
   local clients=() ids=()
   for ((i=1; i<=count; i++)); do
-    read -r -p "UUID for ${label} user $i (leave blank to auto-generate): " uuid
-    if [[ -z "$uuid" ]]; then
-      uuid=$(uuidgen)
-    fi
+    local uuid
+    uuid=$(gen_uuid)
     clients+=("{\"id\":\"$uuid\"${flow:+,\"flow\":\"$flow\"}}")
     ids+=("$uuid")
   done

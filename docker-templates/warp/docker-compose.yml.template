@@ -1,0 +1,38 @@
+version: "3"
+
+services:
+  warp:
+    image: caomingjun/warp:slim-latest
+    container_name: warp
+    restart: always
+
+    # add removed rule back (https://github.com/opencontainers/runc/pull/3468)
+    device_cgroup_rules:
+      - 'c 10:200 rwm'
+
+    ports:
+      - "1080:1080"  # SOCKS5/HTTP via GOST (UDP relayed through SOCKS5)
+
+    environment:
+      - WARP_SLEEP=2
+      # - WARP_LICENSE_KEY=        # optional: WARP+ key
+      # - WARP_ENABLE_NAT=1        # optional: enable NAT mode
+      - GOST_ARGS=-L socks5://:1080?udp=true  # enable SOCKS5 + UDP support
+
+    cap_add:
+      # Docker already has these; mainly for podman users
+      - MKNOD
+      - AUDIT_WRITE
+      # required for WARP to create tun device
+      - NET_ADMIN
+
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv4.conf.all.src_valid_mark=1
+      # uncomment for NAT mode
+      # - net.ipv4.ip_forward=1
+      # - net.ipv6.conf.all.forwarding=1
+      # - net.ipv6.conf.all.accept_ra=2
+
+    volumes:
+      - ./data:/var/lib/cloudflare-warp

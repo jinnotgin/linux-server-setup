@@ -13,6 +13,7 @@ TARGET_USER="$(whoami)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/docker-templates"
 STACK_DIR="" # set later based on TARGET_USER home
+SSH_PORT_SELECTED=""
 BACKUP_DIR="/opt/portainer/backups"
 RCLONE_REMOTE="portainer_gdrive"
 COMPOSE_OUTPUTS=()
@@ -91,6 +92,7 @@ harden_ssh() {
   fi
 
   if [[ -n "$ssh_port" ]]; then
+    SSH_PORT_SELECTED="$ssh_port"
     if grep -qE '^#?Port ' "$sshd_config"; then
       $SUDO sed -i -E "s/^#?Port .*/Port $ssh_port/" "$sshd_config"
     else
@@ -410,6 +412,59 @@ install_tailscale() {
   fi
 }
 
+configure_ufw() {
+  echo "Configuring UFW (with Docker-friendly rules)..."
+  $SUDO apt-get install -y ufw
+
+  if ! $SUDO grep -q "BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
+    cat <<'EOS' | $SUDO tee -a /etc/ufw/after.rules >/dev/null
+# BEGIN UFW AND DOCKER
+*filter
+:ufw-user-forward - [0:0]
+:ufw-docker-logging-deny - [0:0]
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -j ufw-user-forward
+
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+-A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
+-A DOCKER-USER -i docker0 -o docker0 -j ACCEPT
+
+-A DOCKER-USER -j RETURN -s 10.0.0.0/8
+-A DOCKER-USER -j RETURN -s 172.16.0.0/12
+-A DOCKER-USER -j RETURN -s 192.168.0.0/16
+
+-A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 10.0.0.0/8
+-A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 172.16.0.0/12
+-A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 192.168.0.0/16
+
+-A DOCKER-USER -j RETURN
+
+-A ufw-docker-logging-deny -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW DOCKER BLOCK] "
+-A ufw-docker-logging-deny -j DROP
+
+COMMIT
+# END UFW AND DOCKER
+EOS
+  fi
+
+  $SUDO ufw default deny incoming
+  $SUDO ufw default allow outgoing
+
+  local ssh_ports=("22")
+  if [[ -n "$SSH_PORT_SELECTED" && "$SSH_PORT_SELECTED" != "22" ]]; then
+    ssh_ports+=("$SSH_PORT_SELECTED")
+  fi
+  for p in "${ssh_ports[@]}"; do
+    $SUDO ufw allow "$p"/tcp
+  done
+  $SUDO ufw allow ssh
+  $SUDO ufw allow http
+  $SUDO ufw allow https
+
+  $SUDO ufw --force enable
+  $SUDO ufw reload
+}
+
 ensure_proxy_network() {
   local net="proxy_net"
   if command -v docker >/dev/null 2>&1 && ! docker network inspect "$net" >/dev/null 2>&1; then
@@ -497,8 +552,9 @@ render_templates() {
   fi
   read -r -p "Generate Copyparty file server? (y/N): " render_copyparty
   read -r -p "Generate a lightweight health ping container (curl every 5 minutes)? (y/N): " render_health
+  read -r -p "Generate Cloudflare WARP SOCKS5/HTTP proxy? (y/N): " render_warp
 
-  if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_health" =~ ^[Yy]$ && ! "$render_copyparty" =~ ^[Yy]$ ]]; then
+  if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_health" =~ ^[Yy]$ && ! "$render_copyparty" =~ ^[Yy]$ && ! "$render_warp" =~ ^[Yy]$ ]]; then
     echo "No stacks selected for rendering."
     return
   fi
@@ -679,6 +735,17 @@ render_templates() {
     fi
   fi
 
+  # Cloudflare WARP proxy (SOCKS5/HTTP with UDP relay)
+  if [[ "$render_warp" =~ ^[Yy]$ ]]; then
+    local warp_dir="$STACK_DIR/warp"
+    mkdir -p "$warp_dir/data"
+    render_template_file "$TEMPLATE_DIR/warp/docker-compose.yml.template" \
+      "$warp_dir/docker-compose.yml"
+    COMPOSE_OUTPUTS+=("$warp_dir/docker-compose.yml")
+    summary+=$'\n'"WARP proxy on 1080 (SOCKS5/HTTP with UDP relay)"$'\n'
+    summary+="  Data dir: $warp_dir/data"$'\n'
+  fi
+
   # Copyparty file server
   if [[ "$render_copyparty" =~ ^[Yy]$ ]]; then
     local copyparty_dir="$STACK_DIR/copyparty"
@@ -727,8 +794,9 @@ main() {
   read -r -p "Install Docker and Portainer? (y/N): " DO_DOCKER
   read -r -p "Configure Portainer backups to Google Drive? (y/N): " DO_BACKUP
   read -r -p "Install Tailscale with SSH + exit-node enabled? (y/N): " DO_TAILSCALE
+  read -r -p "Configure UFW firewall (HTTP/HTTPS + SSH with Docker rules)? (y/N): " DO_UFW
 
-  local needs_privileged="${DO_SYSTEM,,}${DO_HARDEN,,}${DO_DOCKER,,}${DO_BACKUP,,}${DO_TAILSCALE,,}"
+  local needs_privileged="${DO_SYSTEM,,}${DO_HARDEN,,}${DO_DOCKER,,}${DO_BACKUP,,}${DO_TAILSCALE,,}${DO_UFW,,}"
   if [[ "$needs_privileged" =~ y ]]; then
     prompt_sudo
   fi
@@ -770,6 +838,10 @@ main() {
 
   if [[ "$DO_TAILSCALE" =~ ^[Yy]$ ]]; then
     install_tailscale
+  fi
+
+  if [[ "$DO_UFW" =~ ^[Yy]$ ]]; then
+    configure_ufw
   fi
 
   render_templates

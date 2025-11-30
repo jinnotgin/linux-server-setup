@@ -204,20 +204,65 @@ configure_rclone() {
 create_backup_artifacts() {
   echo "Setting up Portainer backup scripts and systemd timer..."
   $SUDO mkdir -p "$BACKUP_DIR"
-  cat <<'EOS' | $SUDO tee /usr/local/bin/portainer-gdrive-backup.sh >/dev/null
+  local default_host_label
+  default_host_label=$(hostname -s 2>/dev/null || echo "starlight")
+  read -r -p "Preferred host label for rclone backups (e.g. starlight): " BACKUP_HOST_LABEL
+  BACKUP_HOST_LABEL=${BACKUP_HOST_LABEL:-$default_host_label}
+  echo "Using '$BACKUP_HOST_LABEL' as the host label under portainer-backups/"
+
+  cat <<EOS | $SUDO tee /usr/local/bin/portainer-gdrive-backup.sh >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
 BACKUP_DIR="/opt/portainer/backups"
 RCLONE_REMOTE="portainer_gdrive"
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-ARCHIVE="$BACKUP_DIR/portainer-$TIMESTAMP.tar.gz"
+HOST_LABEL="$BACKUP_HOST_LABEL"
+REMOTE_DIR="portainer-backups/\${HOST_LABEL}"
+KEEP_COUNT=10
+TIMESTAMP=\$(date +%Y%m%d-%H%M%S)
+ARCHIVE="\$BACKUP_DIR/portainer-\$TIMESTAMP.tar.gz"
 
-mkdir -p "$BACKUP_DIR"
-docker run --rm -v portainer_data:/data -v "$BACKUP_DIR":/backup alpine \
-  sh -c "tar czf /backup/portainer-$TIMESTAMP.tar.gz /data"
+mkdir -p "\$BACKUP_DIR"
+docker run --rm -v portainer_data:/data -v "\$BACKUP_DIR":/backup alpine \
+  sh -c "tar czf /backup/portainer-\$TIMESTAMP.tar.gz /data"
 
 if command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -q "^${RCLONE_REMOTE}"; then
-  rclone copy "$ARCHIVE" "${RCLONE_REMOTE}:portainer-backups/"
+  if rclone copy "\$ARCHIVE" "\${RCLONE_REMOTE}:/\${REMOTE_DIR}"; then
+    python3 - "\${RCLONE_REMOTE}" "\${REMOTE_DIR}" "\${KEEP_COUNT}" <<'PY'
+import json
+import subprocess
+import sys
+
+remote, remote_dir, keep_raw = sys.argv[1:]
+keep = int(keep_raw)
+target = f"{remote}:/{remote_dir}"
+
+result = subprocess.run(
+    ["rclone", "lsjson", "--files-only", "--fast-list", target],
+    capture_output=True,
+    text=True,
+)
+if result.returncode != 0:
+    sys.exit(0)
+
+try:
+    entries = json.loads(result.stdout)
+except json.JSONDecodeError:
+    sys.exit(0)
+
+files = [f for f in entries if not f.get("IsDir")]
+files.sort(key=lambda f: f.get("ModTime") or "")
+if len(files) <= keep:
+    sys.exit(0)
+
+for entry in files[:-keep]:
+    name = entry.get("Path") or entry.get("Name")
+    if not name:
+        continue
+    subprocess.run(["rclone", "delete", f"{target}/{name}"], check=False)
+PY
+  else
+    echo "rclone upload failed; keeping local archive at \$ARCHIVE" >&2
+  fi
 else
   echo "rclone remote ${RCLONE_REMOTE} not found; skipping cloud upload" >&2
 fi

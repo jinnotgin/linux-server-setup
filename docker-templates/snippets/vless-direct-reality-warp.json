@@ -1,0 +1,23 @@
+,
+    {
+      "listen": "0.0.0.0",
+      "port": 30011,
+      "tag": "reality-warp",
+      "protocol": "vless",
+      "settings": {
+        "clients": {{REALITY_CLIENTS}},
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "xhttpSettings": { "path": "{{XHTTP_PATH}}" },
+        "security": "reality",
+        "realitySettings": {
+          "target": "{{REALITY_TARGET}}",
+          "serverNames": {{REALITY_SERVERNAMES}},
+          "privateKey": "{{REALITY_PRIVATE_KEY}}",
+          "shortIds": {{REALITY_SHORT_IDS}}
+        }
+      },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }
+    }

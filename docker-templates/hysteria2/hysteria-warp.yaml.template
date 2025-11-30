@@ -21,16 +21,10 @@ masquerade:
     rewriteHost: true
 
 outbounds:
-  - name: direct
-    type: direct
   - name: warp
     type: socks5
     socks5:
       addr: warp
       port: 1080
-
-route:
-  rules:
-    - geoip: private
-      outbound: direct
-  default: warp
+  - name: direct
+    type: direct

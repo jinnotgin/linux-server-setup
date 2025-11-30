@@ -1,0 +1,21 @@
+,
+    {
+      "port": 10000,
+      "tag": "cdn-warp",
+      "protocol": "vless",
+      "settings": {
+        "clients": {{VLESS_CLIENTS}},
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {
+          "path": "/ws-offset"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"]
+      }
+    }

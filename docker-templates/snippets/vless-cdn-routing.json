@@ -1,0 +1,6 @@
+,
+  "routing": {
+    "rules": [
+      { "type": "field", "inboundTag": ["cdn-warp"], "outboundTag": "warp" }
+    ]
+  }

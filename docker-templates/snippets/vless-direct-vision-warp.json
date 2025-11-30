@@ -1,0 +1,34 @@
+,
+    {
+      "listen": "0.0.0.0",
+      "port": 20011,
+      "tag": "vision-warp",
+      "protocol": "vless",
+      "settings": {
+        "clients": {{VISION_CLIENTS}},
+        "decryption": "none",
+        "fallbacks": [
+          {
+            "alpn": "h2",
+            "dest": "{{FALLBACK_DEST}}",
+            "xver": 1
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "rejectUnknownSni": true,
+          "minVersion": "1.2",
+          "certificates": [
+            {
+              "ocspStapling": 3600,
+              "certificateFile": "{{DIRECT_TLS_CERT}}",
+              "keyFile": "{{DIRECT_TLS_KEY}}"
+            }
+          ]
+        }
+      },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
+    }

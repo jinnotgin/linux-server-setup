@@ -275,6 +275,13 @@ with open(dest, "w", encoding="utf-8") as f:
 PY
 }
 
+read_snippet() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    cat "$path"
+  fi
+}
+
 collect_domains_with_roles() {
   local domains=()
   while true; do
@@ -557,6 +564,7 @@ render_templates() {
   if [[ "$render_warp" =~ ^[Yy]$ ]]; then
     read -r -p "Also render WARP variants (direct + WARP endpoints) for proxy stacks? (y/N): " render_warp_variants
   fi
+  local SNIPPET_DIR="$TEMPLATE_DIR/snippets"
 
   if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_health" =~ ^[Yy]$ && ! "$render_copyparty" =~ ^[Yy]$ && ! "$render_warp" =~ ^[Yy]$ ]]; then
     echo "No stacks selected for rendering."
@@ -588,10 +596,10 @@ render_templates() {
 
     local ws_warp_inbound="" warp_outbound="" routing_block="" ws_offset_location=""
     if [[ "$render_warp_variants" =~ ^[Yy]$ ]]; then
-      ws_warp_inbound=$',\n    {\n      "port": 10000,\n      "tag": "cdn-warp",\n      "protocol": "vless",\n      "settings": {\n        "clients": '"$VLESS_WS_CLIENTS"$',\n        "decryption": "none"\n      },\n      "streamSettings": {\n        "network": "ws",\n        "security": "none",\n        "wsSettings": {\n          "path": "/ws-offset"\n        }\n      },\n      "sniffing": {\n        "enabled": true,\n        "destOverride": ["http", "tls"]\n      }\n    }'
-      warp_outbound=$',\n    { "protocol": "socks", "tag": "warp", "settings": { "servers": [ { "address": "warp", "port": 1080 } ] } }'
-      routing_block=$',\n  "routing": {\n    "rules": [\n      { "type": "field", "inboundTag": ["cdn-warp"], "outboundTag": "warp" }\n    ]\n  }\n'
-      ws_offset_location=$'\n    location /ws-offset {\n      proxy_pass http://{{VLESS_UPSTREAM}};\n      proxy_http_version 1.1;\n      proxy_set_header Upgrade $http_upgrade;\n      proxy_set_header Connection "upgrade";\n      proxy_set_header Host $host;\n    }\n'
+      ws_warp_inbound=$(read_snippet "$SNIPPET_DIR/vless-cdn-ws-warp-inbound.json")
+      warp_outbound=$(read_snippet "$SNIPPET_DIR/vless-warp-outbound.json")
+      routing_block=$(read_snippet "$SNIPPET_DIR/vless-cdn-routing.json")
+      ws_offset_location=$'\n'"$(read_snippet "$SNIPPET_DIR/nginx-ws-offset-location.conf")"$'\n'
     fi
 
     local nginx_port="443"
@@ -701,11 +709,11 @@ render_templates() {
     mkdir -p "$vless_direct_dir"
     local vision_warp_inbound="" reality_warp_inbound="" warp_outbound="" routing_block="" warp_port_bindings=""
     if [[ "$enable_warp_variants" == "1" ]]; then
-      vision_warp_inbound=$',\n    {\n      "listen": "0.0.0.0",\n      "port": 20011,\n      "tag": "vision-warp",\n      "protocol": "vless",\n      "settings": {\n        "clients": '"$VISION_CLIENTS"$',\n        "decryption": "none",\n        "fallbacks": [\n          {\n            "alpn": "h2",\n            "dest": "gateway:20002",\n            "xver": 1\n          }\n        ]\n      },\n      "streamSettings": {\n        "network": "tcp",\n        "security": "tls",\n        "tlsSettings": {\n          "rejectUnknownSni": true,\n          "minVersion": "1.2",\n          "certificates": [\n            {\n              "ocspStapling": 3600,\n              "certificateFile": "{{DIRECT_TLS_CERT}}",\n              "keyFile": "{{DIRECT_TLS_KEY}}"\n            }\n          ]\n        }\n      },\n      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }\n    }'
-      reality_warp_inbound=$',\n    {\n      "listen": "0.0.0.0",\n      "port": 30011,\n      "tag": "reality-warp",\n      "protocol": "vless",\n      "settings": {\n        "clients": '"$REALITY_CLIENTS"$',\n        "decryption": "none"\n      },\n      "streamSettings": {\n        "network": "tcp",\n        "xhttpSettings": { "path": "{{XHTTP_PATH}}" },\n        "security": "reality",\n        "realitySettings": {\n          "target": "{{REALITY_TARGET}}",\n          "serverNames": {{REALITY_SERVERNAMES}},\n          "privateKey": "{{REALITY_PRIVATE_KEY}}",\n          "shortIds": {{REALITY_SHORT_IDS}}\n        }\n      },\n      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }\n    }'
-      warp_outbound=$',\n    { "protocol": "socks", "tag": "warp", "settings": { "servers": [ { "address": "warp", "port": 1080 } ] } }'
-      routing_block=$',\n  "routing": {\n    "rules": [\n      { "type": "field", "inboundTag": ["vision-warp", "reality-warp"], "outboundTag": "warp" }\n    ]\n  }\n'
-      warp_port_bindings=$'\n    ports:\n      - "20011:20011/tcp"\n      - "30011:30011/tcp"\n'
+      vision_warp_inbound=$(read_snippet "$SNIPPET_DIR/vless-direct-vision-warp.json")
+      reality_warp_inbound=$(read_snippet "$SNIPPET_DIR/vless-direct-reality-warp.json")
+      warp_outbound=$(read_snippet "$SNIPPET_DIR/vless-warp-outbound.json")
+      routing_block=$(read_snippet "$SNIPPET_DIR/vless-direct-routing.json")
+      warp_port_bindings=$'\n'"$(read_snippet "$SNIPPET_DIR/vless-direct-warp-ports.yml")"
     fi
     render_template_file "$TEMPLATE_DIR/vless-direct/config.json.template" \
       "$vless_direct_dir/config.json" \
@@ -723,7 +731,23 @@ render_templates() {
     local hysteria_warp_service="" hysteria_warp_config_path=""
     if [[ "$enable_warp_variants" == "1" ]]; then
       hysteria_warp_config_path="$hysteria_dir/hysteria-warp.yaml"
-      hysteria_warp_service=$'\n  hysteria2-warp:\n    image: tobyxdd/hysteria:latest\n    container_name: hysteria2-warp\n    restart: unless-stopped\n    ports:\n      - "8444:8444/udp"\n      - "8444:8444/tcp"\n    volumes:\n      - '"$hysteria_warp_config_path"':/etc/hysteria.yaml:ro\n      - '"$SSL_DIR"':/certs:ro\n    networks:\n      - proxy_net\n    command: ["server", "-c", "/etc/hysteria.yaml"]'
+      hysteria_warp_service=$(cat <<EOF
+
+  hysteria2-warp:
+    image: tobyxdd/hysteria:latest
+    container_name: hysteria2-warp
+    restart: unless-stopped
+    ports:
+      - "8444:8444/udp"
+      - "8444:8444/tcp"
+    volumes:
+      - "$hysteria_warp_config_path":/etc/hysteria.yaml:ro
+      - "$SSL_DIR":/certs:ro
+    networks:
+      - proxy_net
+    command: ["server", "-c", "/etc/hysteria.yaml"]
+EOF
+)
       render_template_file "$TEMPLATE_DIR/hysteria2/hysteria-warp.yaml.template" \
         "$hysteria_warp_config_path" \
         PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"

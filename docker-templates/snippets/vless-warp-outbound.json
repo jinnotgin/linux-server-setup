@@ -1,0 +1,2 @@
+,
+    { "protocol": "socks", "tag": "warp", "settings": { "servers": [ { "address": "warp", "port": 1080 } ] } }

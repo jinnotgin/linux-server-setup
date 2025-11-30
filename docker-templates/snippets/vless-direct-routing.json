@@ -1,0 +1,6 @@
+,
+  "routing": {
+    "rules": [
+      { "type": "field", "inboundTag": ["vision-warp", "reality-warp"], "outboundTag": "warp" }
+    ]
+  }

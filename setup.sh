@@ -553,6 +553,10 @@ render_templates() {
   read -r -p "Generate Copyparty file server? (y/N): " render_copyparty
   read -r -p "Generate a lightweight health ping container (curl every 5 minutes)? (y/N): " render_health
   read -r -p "Generate Cloudflare WARP SOCKS5/HTTP proxy? (y/N): " render_warp
+  local render_warp_variants="n"
+  if [[ "$render_warp" =~ ^[Yy]$ ]]; then
+    read -r -p "Also render WARP variants (direct + WARP endpoints) for proxy stacks? (y/N): " render_warp_variants
+  fi
 
   if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_health" =~ ^[Yy]$ && ! "$render_copyparty" =~ ^[Yy]$ && ! "$render_warp" =~ ^[Yy]$ ]]; then
     echo "No stacks selected for rendering."
@@ -582,6 +586,14 @@ render_templates() {
     local vless_cdn_dir="$STACK_DIR/vless-cdn"
     mkdir -p "$nginx_dir" "$vless_cdn_dir"
 
+    local ws_warp_inbound="" warp_outbound="" routing_block="" ws_offset_location=""
+    if [[ "$render_warp_variants" =~ ^[Yy]$ ]]; then
+      ws_warp_inbound=$',\n    {\n      "port": 10000,\n      "tag": "cdn-warp",\n      "protocol": "vless",\n      "settings": {\n        "clients": '"$VLESS_WS_CLIENTS"$',\n        "decryption": "none"\n      },\n      "streamSettings": {\n        "network": "ws",\n        "security": "none",\n        "wsSettings": {\n          "path": "/ws-offset"\n        }\n      },\n      "sniffing": {\n        "enabled": true,\n        "destOverride": ["http", "tls"]\n      }\n    }'
+      warp_outbound=$',\n    { "protocol": "socks", "tag": "warp", "settings": { "servers": [ { "address": "warp", "port": 1080 } ] } }'
+      routing_block=$',\n  "routing": {\n    "rules": [\n      { "type": "field", "inboundTag": ["cdn-warp"], "outboundTag": "warp" }\n    ]\n  }\n'
+      ws_offset_location=$'\n    location /ws-offset {\n      proxy_pass http://{{VLESS_UPSTREAM}};\n      proxy_http_version 1.1;\n      proxy_set_header Upgrade $http_upgrade;\n      proxy_set_header Connection "upgrade";\n      proxy_set_header Host $host;\n    }\n'
+    fi
+
     local nginx_port="443"
     if [[ "$render_direct" =~ ^[Yy]$ ]]; then
       nginx_port="6443"
@@ -590,7 +602,7 @@ render_templates() {
     seed_nginx_site "$nginx_dir/www"
     render_template_file "$TEMPLATE_DIR/nginx/nginx.conf.template" \
       "$nginx_dir/nginx.conf" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" TLS_CERT_PATH "$tls_cert_cdn" TLS_KEY_PATH "$tls_key_cdn" VLESS_UPSTREAM "vless-cdn:10000" NGINX_HTTPS_PORT "$nginx_port"
+      PRIMARY_DOMAIN "$CDN_DOMAIN" TLS_CERT_PATH "$tls_cert_cdn" TLS_KEY_PATH "$tls_key_cdn" VLESS_UPSTREAM "vless-cdn:10000" NGINX_HTTPS_PORT "$nginx_port" WS_OFFSET_LOCATION "$ws_offset_location"
     render_template_file "$TEMPLATE_DIR/nginx/docker-compose.yml.template" \
       "$nginx_dir/docker-compose.yml" \
       PRIMARY_DOMAIN "$CDN_DOMAIN" NGINX_HTTPS_PORT "$nginx_port" NGINX_CONF_PATH "$nginx_dir/nginx.conf" NGINX_WWW_PATH "$nginx_dir/www" HOST_SSL_DIR "$SSL_DIR"
@@ -598,7 +610,7 @@ render_templates() {
 
     render_template_file "$TEMPLATE_DIR/vless-cdn/config.json.template" \
       "$vless_cdn_dir/config.json" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CLIENTS "$VLESS_WS_CLIENTS"
+      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CLIENTS "$VLESS_WS_CLIENTS" WS_WARP_INBOUND "$ws_warp_inbound" WARP_OUTBOUND "$warp_outbound" ROUTING_BLOCK "$routing_block"
     render_template_file "$TEMPLATE_DIR/vless-cdn/docker-compose.yml.template" \
       "$vless_cdn_dir/docker-compose.yml" \
       PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CDN_CONFIG_PATH "$vless_cdn_dir/config.json"
@@ -606,6 +618,9 @@ render_templates() {
 
     summary+=$'\n'"CDN VLESS over WebSocket (via $CDN_DOMAIN)"$'\n'
     summary+="  External: https://$CDN_DOMAIN:443/ws (Cloudflare OK)"$'\n'
+    if [[ "$render_warp_variants" =~ ^[Yy]$ ]]; then
+      summary+="  Warp egress path: https://$CDN_DOMAIN:443/ws-offset"$'\n'
+    fi
     summary+="  Internal TLS port (if gateway enabled): $nginx_port"$'\n'
     summary+="  UUIDs: $VLESS_WS_IDS"$'\n'
     summary+="  TLS cert/key: $tls_cert_cdn | $tls_key_cdn"$'\n'
@@ -623,6 +638,7 @@ render_templates() {
     generate_vless_clients "VLESS Vision (XTLS)" "xtls-rprx-vision" VISION_CLIENTS VISION_IDS
     generate_vless_clients "VLESS XHTTP Reality" "xtls-rprx-vision" REALITY_CLIENTS REALITY_IDS
     generate_hysteria_password
+    local enable_warp_variants="$([[ "$render_warp_variants" =~ ^[Yy]$ ]] && echo "1" || echo "0")"
 
     read -r -p "XHTTP path (default: /somepath): " XHTTP_PATH
     XHTTP_PATH=${XHTTP_PATH:-/somepath}
@@ -683,12 +699,20 @@ render_templates() {
     # VLESS direct (Vision + XHTTP Reality)
     local vless_direct_dir="$STACK_DIR/vless-direct"
     mkdir -p "$vless_direct_dir"
+    local vision_warp_inbound="" reality_warp_inbound="" warp_outbound="" routing_block="" warp_port_bindings=""
+    if [[ "$enable_warp_variants" == "1" ]]; then
+      vision_warp_inbound=$',\n    {\n      "listen": "0.0.0.0",\n      "port": 20011,\n      "tag": "vision-warp",\n      "protocol": "vless",\n      "settings": {\n        "clients": '"$VISION_CLIENTS"$',\n        "decryption": "none",\n        "fallbacks": [\n          {\n            "alpn": "h2",\n            "dest": "gateway:20002",\n            "xver": 1\n          }\n        ]\n      },\n      "streamSettings": {\n        "network": "tcp",\n        "security": "tls",\n        "tlsSettings": {\n          "rejectUnknownSni": true,\n          "minVersion": "1.2",\n          "certificates": [\n            {\n              "ocspStapling": 3600,\n              "certificateFile": "{{DIRECT_TLS_CERT}}",\n              "keyFile": "{{DIRECT_TLS_KEY}}"\n            }\n          ]\n        }\n      },\n      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }\n    }'
+      reality_warp_inbound=$',\n    {\n      "listen": "0.0.0.0",\n      "port": 30011,\n      "tag": "reality-warp",\n      "protocol": "vless",\n      "settings": {\n        "clients": '"$REALITY_CLIENTS"$',\n        "decryption": "none"\n      },\n      "streamSettings": {\n        "network": "tcp",\n        "xhttpSettings": { "path": "{{XHTTP_PATH}}" },\n        "security": "reality",\n        "realitySettings": {\n          "target": "{{REALITY_TARGET}}",\n          "serverNames": {{REALITY_SERVERNAMES}},\n          "privateKey": "{{REALITY_PRIVATE_KEY}}",\n          "shortIds": {{REALITY_SHORT_IDS}}\n        }\n      },\n      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }\n    }'
+      warp_outbound=$',\n    { "protocol": "socks", "tag": "warp", "settings": { "servers": [ { "address": "warp", "port": 1080 } ] } }'
+      routing_block=$',\n  "routing": {\n    "rules": [\n      { "type": "field", "inboundTag": ["vision-warp", "reality-warp"], "outboundTag": "warp" }\n    ]\n  }\n'
+      warp_port_bindings=$'\n    ports:\n      - "20011:20011/tcp"\n      - "30011:30011/tcp"\n'
+    fi
     render_template_file "$TEMPLATE_DIR/vless-direct/config.json.template" \
       "$vless_direct_dir/config.json" \
-      VISION_CLIENTS "$VISION_CLIENTS" REALITY_CLIENTS "$REALITY_CLIENTS" XHTTP_PATH "$XHTTP_PATH" REALITY_TARGET "$REALITY_TARGET" REALITY_SERVERNAMES "$sni_json" REALITY_PRIVATE_KEY "$reality_priv" REALITY_SHORT_IDS "$sid_json" DIRECT_TLS_CERT "$tls_cert_direct" DIRECT_TLS_KEY "$tls_key_direct" FALLBACK_DEST "gateway:20002"
+      VISION_CLIENTS "$VISION_CLIENTS" REALITY_CLIENTS "$REALITY_CLIENTS" XHTTP_PATH "$XHTTP_PATH" REALITY_TARGET "$REALITY_TARGET" REALITY_SERVERNAMES "$sni_json" REALITY_PRIVATE_KEY "$reality_priv" REALITY_SHORT_IDS "$sid_json" DIRECT_TLS_CERT "$tls_cert_direct" DIRECT_TLS_KEY "$tls_key_direct" FALLBACK_DEST "gateway:20002" VISION_WARP_INBOUND "$vision_warp_inbound" REALITY_WARP_INBOUND "$reality_warp_inbound" WARP_OUTBOUND "$warp_outbound" ROUTING_BLOCK "$routing_block"
     render_template_file "$TEMPLATE_DIR/vless-direct/docker-compose.yml.template" \
       "$vless_direct_dir/docker-compose.yml" \
-      VLESS_DIRECT_CONFIG_PATH "$vless_direct_dir/config.json" HOST_SSL_DIR "$SSL_DIR"
+      VLESS_DIRECT_CONFIG_PATH "$vless_direct_dir/config.json" HOST_SSL_DIR "$SSL_DIR" WARP_PORT_BINDINGS "$warp_port_bindings"
     COMPOSE_OUTPUTS+=("$vless_direct_dir/docker-compose.yml")
 
     # Hysteria2 (direct)
@@ -696,12 +720,20 @@ render_templates() {
     mkdir -p "$hysteria_dir"
     read -r -p "Masquerade site for Hysteria2 (default: https://news.ycombinator.com): " MASQ
     MASQ=${MASQ:-https://news.ycombinator.com}
+    local hysteria_warp_service="" hysteria_warp_config_path=""
+    if [[ "$enable_warp_variants" == "1" ]]; then
+      hysteria_warp_config_path="$hysteria_dir/hysteria-warp.yaml"
+      hysteria_warp_service=$'\n  hysteria2-warp:\n    image: tobyxdd/hysteria:latest\n    container_name: hysteria2-warp\n    restart: unless-stopped\n    ports:\n      - "8444:8444/udp"\n      - "8444:8444/tcp"\n    volumes:\n      - '"$hysteria_warp_config_path"':/etc/hysteria.yaml:ro\n      - '"$SSL_DIR"':/certs:ro\n    networks:\n      - proxy_net\n    command: ["server", "-c", "/etc/hysteria.yaml"]'
+      render_template_file "$TEMPLATE_DIR/hysteria2/hysteria-warp.yaml.template" \
+        "$hysteria_warp_config_path" \
+        PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
+    fi
     render_template_file "$TEMPLATE_DIR/hysteria2/hysteria.yaml.template" \
       "$hysteria_dir/hysteria.yaml" \
       PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
     render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
       "$hysteria_dir/docker-compose.yml" \
-      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_CONFIG_PATH "$hysteria_dir/hysteria.yaml" HOST_SSL_DIR "$SSL_DIR"
+      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_CONFIG_PATH "$hysteria_dir/hysteria.yaml" HOST_SSL_DIR "$SSL_DIR" HYSTERIA_WARP_SERVICE "$hysteria_warp_service"
     COMPOSE_OUTPUTS+=("$hysteria_dir/docker-compose.yml")
 
     summary+=$'\n'"Direct stack (no CDN) via $DIRECT_DOMAIN"$'\n'
@@ -716,6 +748,10 @@ render_templates() {
     summary+="    Short IDs: $(IFS=', '; echo "${REALITY_SHORT_LIST[*]}")"$'\n'
     summary+="    UUIDs: $REALITY_IDS"$'\n'
     summary+="  Hysteria2 on 8443 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
+    if [[ "$enable_warp_variants" == "1" ]]; then
+      summary+="  Hysteria2 WARP egress on 8444 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
+      summary+="  Warp variants: VLESS Vision on 20011, Reality on 30011 (egress via WARP), same UUIDs"$'\n'
+    fi
     summary+="  TLS cert/key: $tls_cert_direct | $tls_key_direct"$'\n'
   fi
 

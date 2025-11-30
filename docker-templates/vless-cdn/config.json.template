@@ -2,6 +2,7 @@
   "inbounds": [
     {
       "port": 10000,
+      "tag": "cdn-direct",
       "protocol": "vless",
       "settings": {
         "clients": {{VLESS_CLIENTS}},
@@ -18,9 +19,9 @@
         "enabled": true,
         "destOverride": ["http", "tls"]
       }
-    }
+    }{{WS_WARP_INBOUND}}
   ],
   "outbounds": [
-    { "protocol": "freedom" }
-  ]
+    { "protocol": "freedom", "tag": "direct" }{{WARP_OUTBOUND}}
+  ]{{ROUTING_BLOCK}}
 }

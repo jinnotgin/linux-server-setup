@@ -30,6 +30,7 @@ http {
       proxy_set_header Connection "upgrade";
       proxy_set_header Host $host;
     }
+{{WS_OFFSET_LOCATION}}
 
     location / {
       try_files $uri $uri/ /index.html;

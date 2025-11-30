@@ -10,4 +10,11 @@ services:
     volumes:
       - {{HYSTERIA_CONFIG_PATH}}:/etc/hysteria.yaml:ro
       - {{HOST_SSL_DIR}}:/certs:ro
+    networks:
+      - proxy_net
     command: ["server", "-c", "/etc/hysteria.yaml"]
+{{HYSTERIA_WARP_SERVICE}}
+
+networks:
+  proxy_net:
+    external: true

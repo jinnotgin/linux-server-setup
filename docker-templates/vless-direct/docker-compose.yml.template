@@ -7,6 +7,7 @@ services:
     volumes:
       - {{VLESS_DIRECT_CONFIG_PATH}}:/etc/xray/config.json:ro
       - {{HOST_SSL_DIR}}:/certs:ro
+{{WARP_PORT_BINDINGS}}
     networks:
       - proxy_net
     command: ["run", "-config", "/etc/xray/config.json"]

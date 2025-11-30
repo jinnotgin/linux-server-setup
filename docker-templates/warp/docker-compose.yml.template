@@ -5,6 +5,8 @@ services:
     image: caomingjun/warp:slim-latest
     container_name: warp
     restart: always
+    networks:
+      - proxy_net
 
     # add removed rule back (https://github.com/opencontainers/runc/pull/3468)
     device_cgroup_rules:
@@ -36,3 +38,7 @@ services:
 
     volumes:
       - ./data:/var/lib/cloudflare-warp
+
+networks:
+  proxy_net:
+    external: true

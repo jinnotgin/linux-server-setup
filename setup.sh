@@ -170,34 +170,27 @@ configure_rclone() {
   $SUDO apt-get install -y rclone
   local user_home
   user_home=$(eval echo "~$TARGET_USER")
+  local rclone_conf="$user_home/.config/rclone/rclone.conf"
 
-  echo "You can paste a Google Drive service account JSON now. It will be saved under $user_home/service-account.json with $TARGET_USER ownership."
-  read -r -p "Paste the service account JSON now? (y/N): " paste_sa
-  local sa_path=""
+  cat <<'NOTE'
+Configure rclone with Google Drive OAuth (no service account).
+- When prompted for "client_id", paste your Google OAuth Client ID (from Cloud Console -> Credentials).
+- Use the matching "client_secret" if you provided a client_id.
+- For "scope", "drive.file" is recommended (only files rclone creates).
+You will create a remote named "portainer_gdrive".
+NOTE
 
-  if [[ "$paste_sa" =~ ^[Yy]$ ]]; then
-    sa_path="$user_home/service-account.json"
-    echo "Paste JSON content below, then press Ctrl+D when done:"
-    $SUDO install -o "$TARGET_USER" -g "$TARGET_USER" -m 600 /dev/null "$sa_path"
-    # shellcheck disable=SC2002
-    cat > /tmp/sa.tmp
-    $SUDO tee "$sa_path" >/dev/null < /tmp/sa.tmp
-    $SUDO chown "$TARGET_USER:$TARGET_USER" "$sa_path"
-    $SUDO chmod 600 "$sa_path"
-    rm -f /tmp/sa.tmp
-  else
-    read -r -p "Provide path to a Google Drive service account JSON for automated backups (leave blank to skip): " sa_path
-  fi
-
-  if [[ -n "$sa_path" ]]; then
-    if [[ ! -f "$sa_path" ]]; then
-      echo "Service account file not found at $sa_path" >&2
-      exit 1
+  read -r -p "Run interactive 'rclone config' now to create '${RCLONE_REMOTE}'? (y/N): " do_rclone_cfg
+  if [[ "$do_rclone_cfg" =~ ^[Yy]$ ]]; then
+    echo "Launching rclone config as $TARGET_USER (config: $rclone_conf)..."
+    $SUDO -u "$TARGET_USER" -H rclone config
+    if $SUDO -u "$TARGET_USER" -H rclone listremotes 2>/dev/null | grep -q "^${RCLONE_REMOTE}"; then
+      echo "rclone remote '${RCLONE_REMOTE}' detected."
+    else
+      echo "rclone remote '${RCLONE_REMOTE}' not found; run 'rclone config' later to add it." >&2
     fi
-    read -r -p "Enter optional Google Drive folder ID for backups (leave blank to use root): " folder_id
-    $SUDO rclone config create "$RCLONE_REMOTE" drive scope=drive service_account_file="$sa_path" config_is_local=true ${folder_id:+root_folder_id=$folder_id} --non-interactive || true
   else
-    echo "Skipping rclone remote creation. You can configure '$RCLONE_REMOTE' later with 'rclone config'."
+    echo "Skipping interactive rclone config. Add remote '${RCLONE_REMOTE}' later with 'rclone config'."
   fi
 }
 

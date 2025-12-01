@@ -506,6 +506,18 @@ EOS
   $SUDO ufw allow http
   $SUDO ufw allow https
 
+  # If Tailscale is installed, allow all traffic on the tailscale0 interface
+  if command -v tailscale >/dev/null 2>&1; then
+    if ip link show tailscale0 >/dev/null 2>&1; then
+      echo "Tailscale detected; allowing traffic on tailscale0 interface..."
+      $SUDO ufw allow in on tailscale0
+      $SUDO ufw allow out on tailscale0
+    else
+      echo "Tailscale installed but tailscale0 interface not yet active."
+      echo "Run 'sudo ufw allow in on tailscale0 && sudo ufw allow out on tailscale0 && sudo ufw reload' after 'tailscale up'."
+    fi
+  fi
+
   $SUDO ufw --force enable
   $SUDO ufw reload
 }
@@ -648,15 +660,23 @@ render_templates() {
     seed_nginx_site "$nginx_dir/www"
     render_template_file "$TEMPLATE_DIR/nginx/nginx.conf.template" \
       "$nginx_dir/nginx.conf" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" TLS_CERT_PATH "$tls_cert_cdn" TLS_KEY_PATH "$tls_key_cdn" VLESS_UPSTREAM "vless-cdn:10000" NGINX_HTTPS_PORT "$nginx_port" WS_OFFSET_LOCATION "$ws_offset_location"
+      WS_OFFSET_LOCATION "$ws_offset_location" \
+      PRIMARY_DOMAIN "$CDN_DOMAIN" TLS_CERT_PATH "$tls_cert_cdn" TLS_KEY_PATH "$tls_key_cdn" \
+      VLESS_UPSTREAM "vless-cdn:10000" VLESS_WARP_UPSTREAM "vless-cdn:10001" NGINX_HTTPS_PORT "$nginx_port"
     render_template_file "$TEMPLATE_DIR/nginx/docker-compose.yml.template" \
       "$nginx_dir/docker-compose.yml" \
       PRIMARY_DOMAIN "$CDN_DOMAIN" NGINX_HTTPS_PORT "$nginx_port" NGINX_CONF_PATH "$nginx_dir/nginx.conf" NGINX_WWW_PATH "$nginx_dir/www" HOST_SSL_DIR "$SSL_DIR"
     COMPOSE_OUTPUTS+=("$nginx_dir/docker-compose.yml")
 
+    # IMPORTANT: Snippet placeholders (WS_WARP_INBOUND, WARP_OUTBOUND, ROUTING_BLOCK)
+    # must come FIRST so that placeholders inside the snippets (like VLESS_CLIENTS)
+    # get replaced in subsequent passes.
     render_template_file "$TEMPLATE_DIR/vless-cdn/config.json.template" \
       "$vless_cdn_dir/config.json" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CLIENTS "$VLESS_WS_CLIENTS" WS_WARP_INBOUND "$ws_warp_inbound" WARP_OUTBOUND "$warp_outbound" ROUTING_BLOCK "$routing_block"
+      WS_WARP_INBOUND "$ws_warp_inbound" \
+      WARP_OUTBOUND "$warp_outbound" \
+      ROUTING_BLOCK "$routing_block" \
+      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CLIENTS "$VLESS_WS_CLIENTS"
     render_template_file "$TEMPLATE_DIR/vless-cdn/docker-compose.yml.template" \
       "$vless_cdn_dir/docker-compose.yml" \
       PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CDN_CONFIG_PATH "$vless_cdn_dir/config.json"
@@ -753,9 +773,25 @@ render_templates() {
       routing_block=$(read_snippet "$SNIPPET_DIR/vless-direct-routing.json")
       warp_port_bindings=$'\n'"$(read_snippet "$SNIPPET_DIR/vless-direct-warp-ports.yml")"
     fi
+
+    # IMPORTANT: Snippet placeholders must come FIRST so their internal placeholders
+    # (VISION_CLIENTS, REALITY_CLIENTS, DIRECT_TLS_CERT, etc.) get replaced afterward.
     render_template_file "$TEMPLATE_DIR/vless-direct/config.json.template" \
       "$vless_direct_dir/config.json" \
-      VISION_CLIENTS "$VISION_CLIENTS" REALITY_CLIENTS "$REALITY_CLIENTS" XHTTP_PATH "$XHTTP_PATH" REALITY_TARGET "$REALITY_TARGET" REALITY_SERVERNAMES "$sni_json" REALITY_PRIVATE_KEY "$reality_priv" REALITY_SHORT_IDS "$sid_json" DIRECT_TLS_CERT "$tls_cert_direct" DIRECT_TLS_KEY "$tls_key_direct" FALLBACK_DEST "gateway:20002" VISION_WARP_INBOUND "$vision_warp_inbound" REALITY_WARP_INBOUND "$reality_warp_inbound" WARP_OUTBOUND "$warp_outbound" ROUTING_BLOCK "$routing_block"
+      VISION_WARP_INBOUND "$vision_warp_inbound" \
+      REALITY_WARP_INBOUND "$reality_warp_inbound" \
+      WARP_OUTBOUND "$warp_outbound" \
+      ROUTING_BLOCK "$routing_block" \
+      VISION_CLIENTS "$VISION_CLIENTS" \
+      REALITY_CLIENTS "$REALITY_CLIENTS" \
+      XHTTP_PATH "$XHTTP_PATH" \
+      REALITY_TARGET "$REALITY_TARGET" \
+      REALITY_SERVERNAMES "$sni_json" \
+      REALITY_PRIVATE_KEY "$reality_priv" \
+      REALITY_SHORT_IDS "$sid_json" \
+      DIRECT_TLS_CERT "$tls_cert_direct" \
+      DIRECT_TLS_KEY "$tls_key_direct" \
+      FALLBACK_DEST "gateway:20002"
     render_template_file "$TEMPLATE_DIR/vless-direct/docker-compose.yml.template" \
       "$vless_direct_dir/docker-compose.yml" \
       VLESS_DIRECT_CONFIG_PATH "$vless_direct_dir/config.json" HOST_SSL_DIR "$SSL_DIR" WARP_PORT_BINDINGS "$warp_port_bindings"
@@ -779,8 +815,8 @@ render_templates() {
       - "8444:8444/udp"
       - "8444:8444/tcp"
     volumes:
-      - "$hysteria_warp_config_path":/etc/hysteria.yaml:ro
-      - "$SSL_DIR":/certs:ro
+      - ${hysteria_warp_config_path}:/etc/hysteria.yaml:ro
+      - ${SSL_DIR}:/certs:ro
     networks:
       - proxy_net
     command: ["server", "-c", "/etc/hysteria.yaml"]

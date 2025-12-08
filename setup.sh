@@ -203,6 +203,9 @@ create_backup_artifacts() {
   BACKUP_HOST_LABEL=${BACKUP_HOST_LABEL:-$default_host_label}
   echo "Using '$BACKUP_HOST_LABEL' as the host label under portainer-backups/"
 
+  local user_home
+  user_home=$(eval echo "~$TARGET_USER")
+
   cat <<EOS | $SUDO tee /usr/local/bin/portainer-gdrive-backup.sh >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
@@ -213,10 +216,11 @@ REMOTE_DIR="portainer-backups/\${HOST_LABEL}"
 KEEP_COUNT=10
 TIMESTAMP=\$(date +%Y%m%d-%H%M%S)
 ARCHIVE="\$BACKUP_DIR/portainer-\$TIMESTAMP.tar.gz"
+USER_HOME="$user_home"
 
 mkdir -p "\$BACKUP_DIR"
 docker run --rm -v portainer_data:/data -v "\$BACKUP_DIR":/backup alpine \
-  sh -c "tar czf /backup/portainer-\$TIMESTAMP.tar.gz /data"
+  sh -c "tar czf /backup/portainer-\$TIMESTAMP.tar.gz /data \$USER_HOME"
 
 if command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -q "^${RCLONE_REMOTE}"; then
   if rclone copy "\$ARCHIVE" "\${RCLONE_REMOTE}:/\${REMOTE_DIR}"; then

@@ -12,8 +12,8 @@
 - (Optional) Hardens SSH: disables root login and password authentication, forces protocol 2, and restarts `sshd`.
 - Prompts for a username to create/ensure sudo access and docker group membership (password is requested when the user is created).
 - (Optional) Installs Docker Engine + Compose plugin and deploys Portainer (`portainer/portainer-ce`) on ports `8000` and `9443` using the `portainer_data` volume.
-- (Optional) Installs `rclone`, optionally configures a Google Drive remote using a service account JSON, and sets up a daily Portainer backup (local archive + optional Drive upload) with systemd service/timer.
-  - You can paste the service account JSON interactively; it is saved under the selected user’s home directory with correct ownership.
+- (Optional) Installs `rclone`, guides you through Google Drive OAuth (no service account) to create a Drive remote, and sets up a daily Portainer backup (local archive + optional Drive upload) with systemd service/timer, covering both the `portainer_data` volume and the selected user's home directory.
+  - During `rclone config`, you can supply your own Google OAuth client ID/secret; the credentials are stored under the selected user’s home directory with correct ownership.
 - (Optional) Installs Tailscale, enables SSH + exit-node advertising, and optionally brings it up with your provided auth key.
 - Optionally renders Docker Compose templates with your inputs (domain/email/UUIDs/TLS paths) into the `generated/` folder, and can start the stacks right after rendering if Docker is present.
 
@@ -28,7 +28,7 @@ Run as root or a sudo-capable user. The script will prompt for:
 - Which sections to run (system prep, hardening, Docker/Portainer, backups, template rendering).
 - Sudo password (if needed).
 - The username to create/ensure, and a password if the user is being created.
-- Optional Google Drive service account JSON path for automated `rclone` configuration.
+- Optional Google OAuth client ID/secret if you want to override the defaults during `rclone config`.
 - Domain names, email, UUIDs, and other template parameters if you choose to render templates.
 
 > Re-login after the script finishes so the chosen user picks up new group memberships (sudo/docker).

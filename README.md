@@ -16,9 +16,9 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 ## What the script does
 - Requests sudo when privileged steps are selected.
 - General Linux setup can update packages, install common packages, set locale to `en_US.UTF-8`, set timezone to `Asia/Singapore`, create/ensure a sudo user, harden SSH, install Tailscale, and configure UFW.
-- Docker setup can install Docker Engine + Compose plugin, deploy Portainer CE (`portainer/portainer-ce`) on ports `8000` and `9443`, and configure daily Portainer backups.
+- Docker setup can install Docker Engine + Compose plugin, deploy Portainer CE (`portainer/portainer-ce`) on ports `8000` and `9443`, optionally add Docker-friendly UFW rules (`DOCKER-USER` chain in `after.rules`) and open Portainer ports, and configure daily Portainer backups.
 - Portainer backups use `rclone config` with Google Drive OAuth and a remote named `portainer_gdrive`.
-- Tunnel stack setup renders one Portainer-ready Docker Compose file with your inputs under `~/tunnel-stack/docker-compose.yml`. It does not launch Docker Compose for you.
+- Tunnel stack setup renders one Portainer-ready Docker Compose file with your inputs under `~/tunnel-stack/docker-compose.yml`, and optionally opens tunnel ports in UFW (using `ufw route allow` only if Docker-friendly rules are already active). It does not launch Docker Compose for you.
 - Copyparty setup renders its Docker Compose files under `~/copyparty-stack`.
 
 ## Usage

@@ -78,7 +78,7 @@ harden_ssh() {
 install_common_packages() {
   echo "Installing base dependencies..."
   apt_install_best_effort \
-    ca-certificates curl gnupg lsb-release software-properties-common ufw sudo jq uuid-runtime
+    ca-certificates curl gnupg lsb-release software-properties-common ufw sudo jq uuid-runtime btop
 }
 configure_tailscale_forwarding() {
   echo "Enabling IP forwarding for Tailscale subnet router/exit-node use..."

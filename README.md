@@ -4,8 +4,8 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 
 - `scripts/linux-server-setup.sh`: general server setup, SSH hardening, optional Tailscale, and UFW.
 - `scripts/docker-portainer-setup.sh`: Docker Engine, Docker Compose plugin, Portainer CE, and optional Portainer backups to Google Drive via `rclone`.
-- `scripts/tunnel-stack-setup.sh`: tunnel/proxy Docker stack rendering for Certbot, Nginx, VLESS, Hysteria2, WARP variants, and healthcheck.
 - `scripts/copyparty-setup.sh`: standalone Copyparty file-server stack rendering.
+- `scripts/tunnel-stack-setup.sh`: tunnel/proxy Docker stack rendering for Certbot, Nginx, VLESS, Hysteria2, WARP variants, and healthcheck.
 - `scripts/media-stack-setup.sh`: Jellyfin + Radarr + Sonarr + Prowlarr + Byparr + Profilarr stack rendering, with optional SMB/CIFS mount setup and HTTPS via Cloudflare DNS-01.
 
 `setup.sh` is a launcher that lets you run one purpose script or run all of them in order.
@@ -37,8 +37,8 @@ You can also run a purpose script directly:
 chmod +x scripts/*.sh
 ./scripts/linux-server-setup.sh
 ./scripts/docker-portainer-setup.sh
-./scripts/tunnel-stack-setup.sh
 ./scripts/copyparty-setup.sh
+./scripts/tunnel-stack-setup.sh
 ./scripts/media-stack-setup.sh
 ```
 

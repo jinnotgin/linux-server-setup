@@ -17,8 +17,8 @@ main() {
   echo "--- Linux server setup launcher ---"
   echo "1) General Linux server setup"
   echo "2) Docker + Portainer CE setup"
-  echo "3) Tunnel stack setup"
-  echo "4) Copyparty setup"
+  echo "3) Copyparty setup"
+  echo "4) Tunnel stack setup"
   echo "5) Media stack setup"
   echo "6) Run all in order"
   read -r -p "Choose an option [1-6]: " choice
@@ -26,14 +26,14 @@ main() {
   case "$choice" in
     1) run_linux_server_setup ;;
     2) run_docker_portainer_setup ;;
-    3) run_tunnel_stack_setup ;;
-    4) run_copyparty_setup ;;
+    3) run_copyparty_setup ;;
+    4) run_tunnel_stack_setup ;;
     5) run_media_stack_setup ;;
     6)
       run_linux_server_setup
       run_docker_portainer_setup
-      run_tunnel_stack_setup
       run_copyparty_setup
+      run_tunnel_stack_setup
       run_media_stack_setup
       ;;
     *)

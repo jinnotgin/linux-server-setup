@@ -12,6 +12,8 @@ source "$SETUP_DIR/scripts/tunnel-stack-setup.sh"
 source "$SETUP_DIR/scripts/copyparty-setup.sh"
 # shellcheck source=scripts/media-stack-setup.sh
 source "$SETUP_DIR/scripts/media-stack-setup.sh"
+# shellcheck source=scripts/healthcheck-setup.sh
+source "$SETUP_DIR/scripts/healthcheck-setup.sh"
 
 main() {
   echo "--- Linux server setup launcher ---"
@@ -20,8 +22,9 @@ main() {
   echo "3) Copyparty setup"
   echo "4) Tunnel stack setup"
   echo "5) Media stack setup"
-  echo "6) Run all in order"
-  read -r -p "Choose an option [1-6]: " choice
+  echo "6) Host healthcheck setup"
+  echo "7) Run all in order"
+  read -r -p "Choose an option [1-7]: " choice
 
   case "$choice" in
     1) run_linux_server_setup ;;
@@ -29,7 +32,8 @@ main() {
     3) run_copyparty_setup ;;
     4) run_tunnel_stack_setup ;;
     5) run_media_stack_setup ;;
-    6)
+    6) run_healthcheck_setup ;;
+    7)
       run_linux_server_setup
       run_docker_portainer_setup
       run_copyparty_setup
@@ -37,7 +41,7 @@ main() {
       run_media_stack_setup
       ;;
     *)
-      echo "Invalid choice. Use 1, 2, 3, 4, 5, or 6." >&2
+      echo "Invalid choice. Use 1, 2, 3, 4, 5, 6, or 7." >&2
       exit 1
       ;;
   esac

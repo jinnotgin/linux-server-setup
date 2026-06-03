@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "$SCRIPT_DIR/common.sh"
+TUNNEL_STACK_RENDERED=0
 
 render_template() {
   local src="$1"
@@ -225,7 +226,7 @@ render_templates() {
 
   local generated_at
   generated_at=$(date -Iseconds)
-  local cdn_section="" direct_section="" healthcheck_section="" warp_section=""
+  local cdn_section="" direct_section="" warp_section=""
   local files_rows=""
   local README_TEMPLATE_DIR="$TEMPLATE_DIR/tunnel-stack/readme"
 
@@ -237,7 +238,6 @@ render_templates() {
   if [[ -n "${DIRECT_DOMAIN:-}" ]]; then
     read -r -p "Generate Direct stack (Hysteria2 + Vision + XHTTP Reality) for $DIRECT_DOMAIN? (y/N): " render_direct
   fi
-  read -r -p "Generate a lightweight health ping container (curl every 5 minutes)? (y/N): " render_health
   read -r -p "Generate Cloudflare WARP SOCKS5/HTTP proxy? (y/N): " render_warp
   local render_warp_variants="n"
   if [[ "$render_warp" =~ ^[Yy]$ ]]; then
@@ -245,7 +245,7 @@ render_templates() {
   fi
   local SNIPPET_DIR="$TEMPLATE_DIR/snippets"
 
-  if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_health" =~ ^[Yy]$ && ! "$render_warp" =~ ^[Yy]$ ]]; then
+  if [[ ! "$render_cdn" =~ ^[Yy]$ && ! "$render_direct" =~ ^[Yy]$ && ! "$render_warp" =~ ^[Yy]$ ]]; then
     echo "No stacks selected for rendering."
     return
   fi
@@ -569,22 +569,6 @@ keys, and short IDs — only the port differs.
     fi
   fi
 
-  # Healthcheck pinger (curl every 5 minutes)
-  if [[ "$render_health" =~ ^[Yy]$ ]]; then
-    read -r -p "Healthcheck URL to ping: " HEALTHCHECK_URL
-    if [[ -z "$HEALTHCHECK_URL" ]]; then
-      echo "Healthcheck URL is required when enabling the pinger." >&2
-    else
-      local health_dir="$STACK_DIR/healthcheck"
-      mkdir -p "$health_dir"
-      compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/healthcheck.yml.template" \
-        HEALTHCHECK_URL "$HEALTHCHECK_URL")
-      compose_services+=$'\n\n'
-      healthcheck_section=$(render_template "$README_TEMPLATE_DIR/healthcheck-section.md.template" \
-        HEALTHCHECK_URL "$HEALTHCHECK_URL")
-    fi
-  fi
-
   # Cloudflare WARP proxy (SOCKS5/HTTP with UDP relay)
   if [[ "$render_warp" =~ ^[Yy]$ ]]; then
     local warp_dir="$STACK_DIR/warp"
@@ -609,7 +593,6 @@ keys, and short IDs — only the port differs.
     STACK_DIR "$STACK_DIR" \
     CDN_SECTION "$cdn_section" \
     DIRECT_SECTION "$direct_section" \
-    HEALTHCHECK_SECTION "$healthcheck_section" \
     WARP_SECTION "$warp_section" \
     SSL_DIR "$SSL_DIR" \
     DOMAINS_CSV "$DOMAINS_CSV" \
@@ -624,6 +607,7 @@ keys, and short IDs — only the port differs.
 
   echo "Rendered Portainer-ready tunnel compose: $final_compose"
   echo "The compose expects an existing Docker network named proxy_net."
+  TUNNEL_STACK_RENDERED=1
 }
 
 configure_ufw_tunnel() {
@@ -680,12 +664,24 @@ run_tunnel_stack_setup() {
     prompt_sudo
   fi
 
+  init_setup_log "tunnel-stack" "$TARGET_USER"
+  append_setup_log "UFW tunnel ports selected: \`$DO_UFW_TUNNEL\`."
+  TUNNEL_STACK_RENDERED=0
   render_templates
+  if [[ "$TUNNEL_STACK_RENDERED" == "1" ]]; then
+    append_setup_log "Rendered tunnel stack files under \`$STACK_DIR\`."
+    append_setup_log "Docker compose file: \`$STACK_DIR/docker-compose.yml\`."
+    append_setup_log "Client README: \`$STACK_DIR/README.md\`."
+  else
+    append_setup_log "No tunnel stack files rendered because no stack components were selected."
+  fi
 
   if [[ "$DO_UFW_TUNNEL" =~ ^[Yy]$ ]]; then
     configure_ufw_tunnel
+    append_setup_log "Opened UFW ports for tunnel stack."
   fi
 
+  finish_setup_log
   echo "Tunnel stack setup complete."
 }
 

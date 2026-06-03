@@ -10,6 +10,7 @@ BACKUP_DIR="${BACKUP_DIR:-/opt/portainer/backups}"
 RCLONE_REMOTE="${RCLONE_REMOTE:-portainer_gdrive}"
 TARGET_USER="${TARGET_USER:-$(whoami)}"
 COMPOSE_OUTPUTS=()
+SETUP_LOG_FILE="${SETUP_LOG_FILE:-}"
 
 if [[ $(id -u) -eq 0 ]]; then
   SUDO=""
@@ -49,4 +50,32 @@ gen_short_id() {
   else
     printf '%08x' "$RANDOM$RANDOM"
   fi
+}
+init_setup_log() {
+  local name="$1" owner="${2:-$TARGET_USER}" owner_home log_dir timestamp
+  timestamp=$(date +%Y%m%d-%H%M%S)
+  owner_home=$(eval echo "~$owner" 2>/dev/null || echo "$HOME")
+  log_dir="$owner_home/linux-server-setup-logs"
+  if ! mkdir -p "$log_dir" 2>/dev/null; then
+    log_dir="$HOME/linux-server-setup-logs"
+    mkdir -p "$log_dir"
+  fi
+  SETUP_LOG_FILE="$log_dir/${name}-${timestamp}.md"
+  {
+    printf '# %s setup log\n\n' "$name"
+    printf -- '- Generated: `%s`\n' "$(date -Iseconds)"
+    printf -- '- Host: `%s`\n' "$(hostname 2>/dev/null || echo unknown)"
+    printf -- '- User: `%s`\n\n' "$owner"
+    printf '## Actions\n\n'
+  } > "$SETUP_LOG_FILE"
+}
+append_setup_log() {
+  [[ -n "$SETUP_LOG_FILE" ]] || return 0
+  printf -- '- %s\n' "$1" >> "$SETUP_LOG_FILE"
+}
+finish_setup_log() {
+  [[ -n "$SETUP_LOG_FILE" ]] || return 0
+  printf '\n## Finished\n\n' >> "$SETUP_LOG_FILE"
+  printf -- '- Completed: `%s`\n' "$(date -Iseconds)" >> "$SETUP_LOG_FILE"
+  echo "Wrote setup log to $SETUP_LOG_FILE"
 }

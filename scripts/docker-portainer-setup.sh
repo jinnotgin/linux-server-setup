@@ -254,6 +254,11 @@ run_docker_portainer_setup() {
   read -r -p "Install Docker Engine, Docker Compose plugin, and Portainer CE? (Y/n): " DO_DOCKER
   read -r -p "Add Docker-friendly UFW rules and open Portainer ports (8000, 9443)? (y/N): " DO_UFW_DOCKER
   read -r -p "Configure Portainer backups to Google Drive with rclone? (y/N): " DO_BACKUP
+  init_setup_log "docker-portainer" "$TARGET_USER"
+  append_setup_log "Target user: \`$TARGET_USER\`."
+  append_setup_log "Docker + Portainer selected: \`${DO_DOCKER:-Y}\`."
+  append_setup_log "Docker-friendly UFW selected: \`$DO_UFW_DOCKER\`."
+  append_setup_log "Portainer backup selected: \`$DO_BACKUP\`."
 
   if [[ -z "$DO_DOCKER" || "$DO_DOCKER" =~ ^[Yy]$ || "$DO_UFW_DOCKER" =~ ^[Yy]$ || "$DO_BACKUP" =~ ^[Yy]$ ]]; then
     prompt_sudo
@@ -262,17 +267,22 @@ run_docker_portainer_setup() {
   if [[ -z "$DO_DOCKER" || "$DO_DOCKER" =~ ^[Yy]$ ]]; then
     install_docker
     install_portainer
+    append_setup_log "Installed Docker Engine/Compose plugin and deployed Portainer."
   fi
 
   if [[ "$DO_UFW_DOCKER" =~ ^[Yy]$ ]]; then
     configure_ufw_docker
+    append_setup_log "Configured Docker-friendly UFW rules and opened Portainer ports."
   fi
 
   if [[ "$DO_BACKUP" =~ ^[Yy]$ ]]; then
     configure_rclone
     create_backup_artifacts
+    append_setup_log "Configured Portainer backup script and systemd timer."
+    append_setup_log "Backup directory: \`$BACKUP_DIR\`."
   fi
 
+  finish_setup_log
   echo "Docker + Portainer setup complete. Re-login so $TARGET_USER picks up docker group membership."
 }
 

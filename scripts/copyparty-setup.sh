@@ -52,6 +52,10 @@ run_copyparty_setup() {
   fi
   read -r -p "Copyparty data directory to share (default: $USER_HOME): " COPYPARTY_DATA_PATH
   COPYPARTY_DATA_PATH=${COPYPARTY_DATA_PATH:-$USER_HOME}
+  init_setup_log "copyparty" "$TARGET_USER"
+  append_setup_log "Target user: \`$TARGET_USER\`."
+  append_setup_log "Stack directory: \`$STACK_DIR\`."
+  append_setup_log "Data directory: \`$COPYPARTY_DATA_PATH\`."
 
   render_template_file "$TEMPLATE_DIR/copyparty/copyparty.conf.template" \
     "$copyparty_dir/cfg/copyparty.conf" \
@@ -69,6 +73,10 @@ run_copyparty_setup() {
 
   echo "Copyparty files rendered under $STACK_DIR."
   echo "To launch: import $copyparty_dir/docker-compose.yml into Portainer as a stack."
+  append_setup_log "Rendered Copyparty config: \`$copyparty_dir/cfg/copyparty.conf\`."
+  append_setup_log "Rendered compose file: \`$copyparty_dir/docker-compose.yml\`."
+  append_setup_log "Wrote summary: \`$copyparty_dir/summary.txt\`."
+  finish_setup_log
   echo "Copyparty setup complete."
 }
 

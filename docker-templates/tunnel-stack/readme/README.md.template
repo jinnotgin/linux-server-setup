@@ -25,7 +25,7 @@ container for an additional layer of indirection.
 
 ---
 
-{{CDN_SECTION}}{{DIRECT_SECTION}}{{HEALTHCHECK_SECTION}}{{WARP_SECTION}}## TLS Certificates
+{{CDN_SECTION}}{{DIRECT_SECTION}}{{WARP_SECTION}}## TLS Certificates
 
 The `certbot` service handles issuance and renewal for all configured domains.
 It uses Cloudflare DNS-01 so the server never needs to expose port 80.

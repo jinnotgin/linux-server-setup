@@ -2,11 +2,12 @@
 
 This repository provides purpose-based interactive setup scripts for Ubuntu/Debian-like hosts:
 
-- `scripts/linux-server-setup.sh`: general server setup, SSH hardening, optional Tailscale, and UFW.
+- `scripts/linux-server-setup.sh`: general server setup, SSH hardening, optional Tailscale, UFW, and optional host-level healthchecks.io uptime ping.
 - `scripts/docker-portainer-setup.sh`: Docker Engine, Docker Compose plugin, Portainer CE, and optional Portainer backups to Google Drive via `rclone`.
 - `scripts/copyparty-setup.sh`: standalone Copyparty file-server stack rendering.
-- `scripts/tunnel-stack-setup.sh`: tunnel/proxy Docker stack rendering for Certbot, Nginx, VLESS, Hysteria2, WARP variants, and healthcheck.
+- `scripts/tunnel-stack-setup.sh`: tunnel/proxy Docker stack rendering for Certbot, Nginx, VLESS, Hysteria2, and WARP variants.
 - `scripts/media-stack-setup.sh`: Jellyfin + Radarr + Sonarr + Prowlarr + Byparr + Profilarr stack rendering, with optional SMB/CIFS mount setup and HTTPS via Cloudflare DNS-01.
+- `scripts/healthcheck-setup.sh`: host-level healthchecks.io uptime ping using a systemd service and timer.
 
 `setup.sh` is a launcher that lets you run one purpose script or run all of them in order.
 
@@ -16,10 +17,11 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 
 ## What the script does
 - Requests sudo when privileged steps are selected.
-- General Linux setup can update packages, install common packages, set locale to `en_US.UTF-8`, set timezone to `Asia/Singapore`, create/ensure a sudo user, harden SSH, install Tailscale, and configure UFW.
+- General Linux setup can update packages, install common packages, set locale to `en_US.UTF-8`, set timezone to `Asia/Singapore`, create/ensure a sudo user, harden SSH, install Tailscale, configure UFW, and install a host-level healthchecks.io uptime ping.
 - Docker setup can install Docker Engine + Compose plugin, deploy Portainer CE (`portainer/portainer-ce`) on ports `8000` and `9443`, optionally add Docker-friendly UFW rules (`DOCKER-USER` chain in `after.rules`) and open Portainer ports, and configure daily Portainer backups.
 - Portainer backups use `rclone config` with Google Drive OAuth and a remote named `portainer_gdrive`.
 - Tunnel stack setup renders one Portainer-ready Docker Compose file with your inputs under `~/tunnel-stack/docker-compose.yml`, and optionally opens tunnel ports in UFW (using `ufw route allow` only if Docker-friendly rules are already active). It does not launch Docker Compose for you.
+- Host healthcheck setup installs `linux-server-healthcheck.service` and `linux-server-healthcheck.timer`, which ping your healthchecks.io URL every 5 minutes without depending on Docker.
 - Copyparty setup renders its Docker Compose files under `~/copyparty-stack`.
 - The media stack script renders a stack under `~/media-stack/docker-compose.yml` with Jellyfin (8096), Radarr (7878), Sonarr (8989), Prowlarr (9696), Byparr (8191), Profilarr (6868), a Cloudflare DNS-01 certbot, and an Nginx HTTPS reverse proxy (443 → Jellyfin). If SMB mounting is selected, the script installs `cifs-utils`, mounts the share, and writes an `/etc/fstab` entry for persistence; the NAS hostname and IP are also injected via `extra_hosts` into Radarr and Sonarr. The script does not launch Docker Compose for you.
 
@@ -40,6 +42,7 @@ chmod +x scripts/*.sh
 ./scripts/copyparty-setup.sh
 ./scripts/tunnel-stack-setup.sh
 ./scripts/media-stack-setup.sh
+./scripts/healthcheck-setup.sh
 ```
 
 For fresh servers, run the scripts in that order. `setup.sh` also has a "Run all in order" option.
@@ -52,6 +55,9 @@ Run as root or a sudo-capable user. The scripts will prompt for:
 - The username to create/ensure, and a password if the user is being created.
 - Optional interactive `rclone config` for the Google Drive remote used by Portainer backups.
 - Domain names, email, UUIDs, and other template parameters if you choose to render templates.
+- Optional healthchecks.io ping URL for host uptime monitoring.
+
+Each setup script writes a lightweight finished log under `~/linux-server-setup-logs/` with the selected options, generated files, and follow-up notes.
 
 > Re-login after the script finishes so the chosen user picks up new group memberships (sudo/docker).
 
@@ -66,7 +72,6 @@ See [`docs/portainer-backup.md`](docs/portainer-backup.md) for details on how th
   - **gateway-router**: Nginx stream router on public port `2053` SNI-routing to CDN (vless-cdn), Direct Vision, and XHTTP Reality; serves the Vision fallback site on 20002.
   - **vless-direct**: `ghcr.io/xtls/xray-core:latest` with VLESS Vision (XTLS) + VLESS XHTTP Reality, using the Direct domain cert from `/certs`.
   - **hysteria2**: single-password Hysteria2 using the Direct domain cert; masquerade target configurable.
-  - **healthcheck**: tiny curl container that pings a user URL every 5 minutes (healthchecks.io-friendly).
 - The Copyparty script renders a separate file-server stack under `~/copyparty-stack`; default port 3923.
 
 After rendering, import `~/tunnel-stack/docker-compose.yml` into Portainer or run it yourself later. The setup script intentionally does not run Docker Compose.

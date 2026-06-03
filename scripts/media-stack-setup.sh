@@ -163,6 +163,13 @@ run_media_stack_setup() {
   elif [[ "$DO_UFW_MEDIA" =~ ^[Yy]$ ]]; then
     prompt_sudo
   fi
+  init_setup_log "media-stack" "$TARGET_USER"
+  append_setup_log "Target user: \`$TARGET_USER\`."
+  append_setup_log "Stack directory: \`$STACK_DIR\`."
+  append_setup_log "Media domain: \`$MEDIA_DOMAIN\`."
+  append_setup_log "Videos path: \`$MEDIA_VIDEOS_PATH\`."
+  append_setup_log "SMB mount selected: \`$DO_SMB\`."
+  append_setup_log "UFW 443 selected: \`$DO_UFW_MEDIA\`."
 
   # Create directory structure
   local NGINX_DIR="$STACK_DIR/nginx"
@@ -210,12 +217,16 @@ run_media_stack_setup() {
   fi
 
   echo "Media stack files rendered under $STACK_DIR."
+  append_setup_log "Rendered media stack compose: \`$STACK_DIR/docker-compose.yml\`."
+  append_setup_log "Rendered nginx config: \`$NGINX_CONF_PATH\`."
 
   if [[ "$DO_UFW_MEDIA" =~ ^[Yy]$ ]]; then
     configure_ufw_media
+    append_setup_log "Opened UFW port 443/tcp for nginx-media."
   fi
 
   echo "To launch: import $STACK_DIR/docker-compose.yml into Portainer as a stack."
+  finish_setup_log
   echo "Media stack setup complete."
 }
 

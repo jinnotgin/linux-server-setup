@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "$SCRIPT_DIR/common.sh"
+# shellcheck source=scripts/healthcheck-setup.sh
+source "$SCRIPT_DIR/healthcheck-setup.sh"
 
 update_system() {
   echo "Updating apt package lists and upgrading packages..."
@@ -137,18 +139,27 @@ run_linux_server_setup() {
   read -r -p "Harden SSH/root login? (y/N): " DO_HARDEN
   read -r -p "Install Tailscale with SSH + exit-node enabled? (y/N): " DO_TAILSCALE
   read -r -p "Configure UFW firewall (SSH, HTTP, HTTPS)? (y/N): " DO_UFW
+  read -r -p "Install host-level healthchecks.io uptime ping? (y/N): " DO_HEALTHCHECK
 
-  if [[ "$DO_SYSTEM" =~ ^[Yy]$ || "$DO_HARDEN" =~ ^[Yy]$ || "$DO_TAILSCALE" =~ ^[Yy]$ || "$DO_UFW" =~ ^[Yy]$ ]]; then
+  if [[ "$DO_SYSTEM" =~ ^[Yy]$ || "$DO_HARDEN" =~ ^[Yy]$ || "$DO_TAILSCALE" =~ ^[Yy]$ || "$DO_UFW" =~ ^[Yy]$ || "$DO_HEALTHCHECK" =~ ^[Yy]$ ]]; then
     prompt_sudo
   fi
 
   if [[ "$DO_SYSTEM" =~ ^[Yy]$ ]]; then
     read -r -p "Username to create/ensure sudo access for (default: $TARGET_USER): " input_user
     TARGET_USER=${input_user:-$TARGET_USER}
+    init_setup_log "linux-server" "$TARGET_USER"
+    append_setup_log "Target user: \`$TARGET_USER\`."
+    append_setup_log "System setup selected: \`$DO_SYSTEM\`."
+    append_setup_log "SSH hardening selected: \`$DO_HARDEN\`."
+    append_setup_log "Tailscale selected: \`$DO_TAILSCALE\`."
+    append_setup_log "UFW selected: \`$DO_UFW\`."
+    append_setup_log "Host healthcheck selected: \`$DO_HEALTHCHECK\`."
     update_system
     install_common_packages
     configure_locale_timezone
     ensure_user "$TARGET_USER"
+    append_setup_log "Updated packages, installed common dependencies, configured locale/timezone, and ensured sudo user."
   else
     read -r -p "Username to use for server ownership/settings (default: $TARGET_USER): " input_user
     TARGET_USER=${input_user:-$TARGET_USER}
@@ -162,20 +173,36 @@ run_linux_server_setup() {
         TARGET_USER="$(whoami)"
       fi
     fi
+    init_setup_log "linux-server" "$TARGET_USER"
+    append_setup_log "Target user: \`$TARGET_USER\`."
+    append_setup_log "System setup selected: \`$DO_SYSTEM\`."
+    append_setup_log "SSH hardening selected: \`$DO_HARDEN\`."
+    append_setup_log "Tailscale selected: \`$DO_TAILSCALE\`."
+    append_setup_log "UFW selected: \`$DO_UFW\`."
+    append_setup_log "Host healthcheck selected: \`$DO_HEALTHCHECK\`."
   fi
 
   if [[ "$DO_HARDEN" =~ ^[Yy]$ ]]; then
     harden_ssh
+    append_setup_log "Hardened SSH configuration. Selected SSH port: \`${SSH_PORT_SELECTED:-existing}\`."
   fi
 
   if [[ "$DO_TAILSCALE" =~ ^[Yy]$ ]]; then
     install_tailscale
+    append_setup_log "Installed and enabled Tailscale."
   fi
 
   if [[ "$DO_UFW" =~ ^[Yy]$ ]]; then
     configure_ufw
+    append_setup_log "Configured UFW defaults and opened SSH, HTTP, and HTTPS."
   fi
 
+  if [[ "$DO_HEALTHCHECK" =~ ^[Yy]$ ]]; then
+    read -r -p "healthchecks.io ping URL: " HEALTHCHECK_URL
+    install_host_healthcheck "$HEALTHCHECK_URL"
+  fi
+
+  finish_setup_log
   echo "Linux server setup complete. You may need to re-login for group changes to take effect."
 }
 

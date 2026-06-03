@@ -80,6 +80,58 @@ install_common_packages() {
   apt_install_best_effort \
     ca-certificates curl gnupg lsb-release software-properties-common ufw sudo jq uuid-runtime btop
 }
+configure_swap_if_missing() {
+  echo "Checking swap configuration..."
+  if swapon --noheadings --show=NAME 2>/dev/null | grep -q .; then
+    echo "Swap is already active; skipping swapfile setup."
+    append_setup_log "Swap already active; skipped swapfile setup."
+    return 0
+  fi
+
+  read -r -p "No active swap detected. Create a swapfile? (y/N): " create_swap
+  if [[ ! "$create_swap" =~ ^[Yy]$ ]]; then
+    echo "Skipping swapfile setup."
+    append_setup_log "No active swap detected; swapfile setup skipped by user."
+    return 0
+  fi
+
+  local swap_size
+  read -r -p "Swap size to create (for example 2G or 512M): " swap_size
+  if [[ ! "$swap_size" =~ ^[1-9][0-9]*[MG]$ ]]; then
+    echo "Invalid swap size '$swap_size'. Use a value like 2G or 512M." >&2
+    return 1
+  fi
+
+  prompt_sudo
+  if [[ -e /swapfile ]]; then
+    echo "/swapfile already exists but is not active; leaving it unchanged." >&2
+    append_setup_log "\`/swapfile\` already exists but is not active; skipped swapfile creation."
+    return 1
+  fi
+
+  echo "Creating ${swap_size} swapfile at /swapfile..."
+  if have_command fallocate; then
+    $SUDO fallocate -l "$swap_size" /swapfile || return 1
+  else
+    local block_size_mb count
+    block_size_mb=1
+    count="${swap_size%M}"
+    if [[ "$swap_size" == *G ]]; then
+      count=$(( ${swap_size%G} * 1024 ))
+    fi
+    $SUDO dd if=/dev/zero of=/swapfile bs="${block_size_mb}M" count="$count" status=progress || return 1
+  fi
+
+  $SUDO chmod 600 /swapfile || return 1
+  $SUDO mkswap /swapfile || return 1
+  $SUDO swapon /swapfile || return 1
+
+  if ! grep -qE '^[[:space:]]*/swapfile[[:space:]]+none[[:space:]]+swap[[:space:]]+' /etc/fstab 2>/dev/null; then
+    echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null || return 1
+  fi
+
+  append_setup_log "Created and enabled \`${swap_size}\` swapfile at \`/swapfile\`."
+}
 configure_tailscale_forwarding() {
   echo "Enabling IP forwarding for Tailscale subnet router/exit-node use..."
   local sysctl_file="/etc/sysctl.d/99-tailscale.conf"
@@ -285,6 +337,7 @@ run_linux_server_setup() {
     append_setup_log "Host healthcheck selected: \`$DO_HEALTHCHECK\`."
     run_step "System update" update_system
     run_step "Base dependency install" install_common_packages
+    run_step "Swap configuration check" configure_swap_if_missing
     run_step "Locale/timezone configuration" configure_locale_timezone
     run_step "Sudo user setup" ensure_linux_user "$TARGET_USER"
   else

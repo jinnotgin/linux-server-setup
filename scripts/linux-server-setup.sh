@@ -80,6 +80,72 @@ install_common_packages() {
   apt_install_best_effort \
     ca-certificates curl gnupg lsb-release software-properties-common ufw sudo jq uuid-runtime
 }
+configure_tailscale_forwarding() {
+  echo "Enabling IP forwarding for Tailscale subnet router/exit-node use..."
+  local sysctl_file="/etc/sysctl.d/99-tailscale.conf"
+  if [[ ! -d /etc/sysctl.d ]]; then
+    sysctl_file="/etc/sysctl.conf"
+  fi
+
+  if [[ "$sysctl_file" == "/etc/sysctl.conf" ]]; then
+    if ! grep -qE '^net\.ipv4\.ip_forward[[:space:]]*=' "$sysctl_file" 2>/dev/null; then
+      echo 'net.ipv4.ip_forward = 1' | $SUDO tee -a "$sysctl_file" >/dev/null || return 1
+    else
+      $SUDO sed -i -E 's/^net\.ipv4\.ip_forward[[:space:]]*=.*/net.ipv4.ip_forward = 1/' "$sysctl_file" || return 1
+    fi
+    if ! grep -qE '^net\.ipv6\.conf\.all\.forwarding[[:space:]]*=' "$sysctl_file" 2>/dev/null; then
+      echo 'net.ipv6.conf.all.forwarding = 1' | $SUDO tee -a "$sysctl_file" >/dev/null || return 1
+    else
+      $SUDO sed -i -E 's/^net\.ipv6\.conf\.all\.forwarding[[:space:]]*=.*/net.ipv6.conf.all.forwarding = 1/' "$sysctl_file" || return 1
+    fi
+  else
+    printf 'net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n' | $SUDO tee "$sysctl_file" >/dev/null || return 1
+  fi
+
+  $SUDO sysctl -p "$sysctl_file" || return 1
+}
+configure_tailscale_udp_offloads() {
+  echo "Configuring Linux UDP offload tuning for Tailscale..."
+  apt_install_best_effort ethtool
+  if ! have_command ethtool; then
+    warn_continue "ethtool is unavailable; skipping Tailscale UDP offload tuning."
+    return 0
+  fi
+  if ! have_command ip; then
+    warn_continue "ip command is unavailable; skipping Tailscale UDP offload tuning."
+    return 0
+  fi
+
+  local netdev
+  netdev=$(ip -o route get 8.8.8.8 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+  if [[ -z "$netdev" ]]; then
+    warn_continue "Could not determine default network interface; skipping Tailscale UDP offload tuning."
+    return 0
+  fi
+
+  if ! $SUDO ethtool -K "$netdev" rx-udp-gro-forwarding on rx-gro-list off; then
+    warn_continue "Could not apply Tailscale UDP offload tuning on \`$netdev\`; the interface or kernel may not support these flags."
+    return 0
+  fi
+
+  if systemctl is-enabled networkd-dispatcher >/dev/null 2>&1; then
+    $SUDO mkdir -p /etc/networkd-dispatcher/routable.d || return 1
+    printf '#!/bin/sh\n\nethtool -K %s rx-udp-gro-forwarding on rx-gro-list off\n' "$netdev" | \
+      $SUDO tee /etc/networkd-dispatcher/routable.d/50-tailscale >/dev/null || return 1
+    $SUDO chmod 755 /etc/networkd-dispatcher/routable.d/50-tailscale || return 1
+    $SUDO /etc/networkd-dispatcher/routable.d/50-tailscale || return 1
+    append_setup_log "Installed persistent Tailscale UDP offload script for \`$netdev\`."
+  else
+    warn_continue "networkd-dispatcher is not enabled; Tailscale UDP offload tuning was applied now but may not persist after reboot."
+  fi
+}
+configure_tailscale_firewalld() {
+  if have_command firewall-cmd && systemctl is-active firewalld >/dev/null 2>&1; then
+    echo "firewalld detected; enabling masquerading for Tailscale subnet routing compatibility..."
+    $SUDO firewall-cmd --permanent --add-masquerade || return 1
+    $SUDO firewall-cmd --reload || return 1
+  fi
+}
 install_tailscale() {
   echo "Installing Tailscale and enabling SSH + exit-node advertising..."
   if ! command -v curl >/dev/null 2>&1; then
@@ -94,14 +160,28 @@ install_tailscale() {
   curl -fsSL https://tailscale.com/install.sh | $SUDO sh || return 1
   $SUDO systemctl enable --now tailscaled || return 1
 
-  # Pre-set preferences as requested
-  $SUDO tailscale set --ssh --advertise-exit-node || return 1
+  configure_tailscale_forwarding || return 1
+  configure_tailscale_udp_offloads || return 1
+  configure_tailscale_firewalld || return 1
+
+  read -r -p "Subnet routes to advertise (comma-separated CIDRs, leave blank for none): " tailscale_routes
+
+  local tailscale_args=(--ssh --advertise-exit-node)
+  if [[ -n "$tailscale_routes" ]]; then
+    tailscale_args+=(--advertise-routes="$tailscale_routes")
+  fi
+
+  $SUDO tailscale set "${tailscale_args[@]}" || return 1
 
   read -r -p "Tailscale auth key (tskey-..., leave blank to skip bringing the node up now): " tailscale_key
   if [[ -n "$tailscale_key" ]]; then
-    $SUDO tailscale up --auth-key="$tailscale_key" --advertise-exit-node || return 1
+    $SUDO tailscale up --auth-key="$tailscale_key" "${tailscale_args[@]}" || return 1
   else
-    echo "Skipped 'tailscale up'; run 'sudo tailscale up --auth-key=... --advertise-exit-node' later."
+    if [[ -n "$tailscale_routes" ]]; then
+      echo "Skipped 'tailscale up'; run 'sudo tailscale up --auth-key=... --ssh --advertise-exit-node --advertise-routes=$tailscale_routes' later."
+    else
+      echo "Skipped 'tailscale up'; run 'sudo tailscale up --auth-key=... --ssh --advertise-exit-node' later."
+    fi
   fi
 }
 configure_ufw() {

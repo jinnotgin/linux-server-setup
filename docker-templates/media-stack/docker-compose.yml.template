@@ -1,0 +1,114 @@
+version: "3.9"
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    volumes:
+      - {{JELLYFIN_CONFIG_DIR}}:/config
+      - {{JELLYFIN_CACHE_DIR}}:/cache
+      - {{MEDIA_VIDEOS_PATH}}:/media/videos:ro
+    environment:
+      - TZ=Asia/Singapore
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    ports:
+      - "7878:7878"
+    volumes:
+      - {{RADARR_CONFIG_DIR}}:/config
+      - {{MEDIA_VIDEOS_PATH}}:/media/videos
+    environment:
+      - PUID={{PUID}}
+      - PGID={{PGID}}
+      - TZ=Asia/Singapore
+{{RADARR_EXTRA_HOSTS}}
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    ports:
+      - "8989:8989"
+    volumes:
+      - {{SONARR_CONFIG_DIR}}:/config
+      - {{MEDIA_VIDEOS_PATH}}:/media/videos
+    environment:
+      - PUID={{PUID}}
+      - PGID={{PGID}}
+      - TZ=Asia/Singapore
+{{SONARR_EXTRA_HOSTS}}
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    ports:
+      - "9696:9696"
+    volumes:
+      - {{PROWLARR_CONFIG_DIR}}:/config
+    environment:
+      - PUID={{PUID}}
+      - PGID={{PGID}}
+      - TZ=Asia/Singapore
+
+  byparr:
+    image: ghcr.io/thephaseless/byparr:latest
+    container_name: byparr
+    restart: unless-stopped
+    ports:
+      - "8191:8191"
+    environment:
+      - TZ=Asia/Singapore
+      - LOG_LEVEL=info
+    mem_limit: 1g
+    memswap_limit: 1g
+
+  profilarr:
+    image: ghcr.io/dictionarry-hub/profilarr:latest
+    container_name: profilarr
+    restart: unless-stopped
+    ports:
+      - "6868:6868"
+    volumes:
+      - {{PROFILARR_CONFIG_DIR}}:/config
+    environment:
+      - PUID={{PUID}}
+      - PGID={{PGID}}
+      - UMASK=022
+      - TZ=Asia/Singapore
+
+  certbot-media:
+    image: serversideup/certbot-dns-cloudflare
+    container_name: certbot-media
+    restart: unless-stopped
+    volumes:
+      - {{HOST_SSL_DIR}}:/etc/letsencrypt
+    environment:
+      CLOUDFLARE_API_TOKEN: "{{CLOUDFLARE_API_TOKEN}}"
+      CERTBOT_EMAIL: "{{CERTBOT_EMAIL}}"
+      CERTBOT_DOMAINS: "{{CERTBOT_DOMAIN}}"
+    healthcheck:
+      test: ["CMD", "test", "-f", "/etc/letsencrypt/live/{{CERTBOT_DOMAIN}}/fullchain.pem"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+
+  nginx-media:
+    image: nginx:stable-alpine
+    container_name: nginx-media
+    restart: unless-stopped
+    depends_on:
+      certbot-media:
+        condition: service_healthy
+      jellyfin:
+        condition: service_started
+    ports:
+      - "443:443"
+    volumes:
+      - {{NGINX_CONF_PATH}}:/etc/nginx/nginx.conf:ro
+      - {{HOST_SSL_DIR}}:/certs:ro

@@ -6,6 +6,7 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 - `scripts/docker-portainer-setup.sh`: Docker Engine, Docker Compose plugin, Portainer CE, and optional Portainer backups to Google Drive via `rclone`.
 - `scripts/tunnel-stack-setup.sh`: tunnel/proxy Docker stack rendering for Certbot, Nginx, VLESS, Hysteria2, WARP variants, and healthcheck.
 - `scripts/copyparty-setup.sh`: standalone Copyparty file-server stack rendering.
+- `scripts/media-stack-setup.sh`: Jellyfin + Radarr + Sonarr + Prowlarr + Byparr + Profilarr stack rendering, with optional SMB/CIFS mount setup and HTTPS via Cloudflare DNS-01.
 
 `setup.sh` is a launcher that lets you run one purpose script or run all of them in order.
 
@@ -20,6 +21,7 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 - Portainer backups use `rclone config` with Google Drive OAuth and a remote named `portainer_gdrive`.
 - Tunnel stack setup renders one Portainer-ready Docker Compose file with your inputs under `~/tunnel-stack/docker-compose.yml`, and optionally opens tunnel ports in UFW (using `ufw route allow` only if Docker-friendly rules are already active). It does not launch Docker Compose for you.
 - Copyparty setup renders its Docker Compose files under `~/copyparty-stack`.
+- The media stack script renders a stack under `~/media-stack/docker-compose.yml` with Jellyfin (8096), Radarr (7878), Sonarr (8989), Prowlarr (9696), Byparr (8191), Profilarr (6868), a Cloudflare DNS-01 certbot, and an Nginx HTTPS reverse proxy (443 → Jellyfin). If SMB mounting is selected, the script installs `cifs-utils`, mounts the share, and writes an `/etc/fstab` entry for persistence; the NAS hostname and IP are also injected via `extra_hosts` into Radarr and Sonarr. The script does not launch Docker Compose for you.
 
 ## Usage
 ```bash
@@ -37,6 +39,7 @@ chmod +x scripts/*.sh
 ./scripts/docker-portainer-setup.sh
 ./scripts/tunnel-stack-setup.sh
 ./scripts/copyparty-setup.sh
+./scripts/media-stack-setup.sh
 ```
 
 For fresh servers, run the scripts in that order. `setup.sh` also has a "Run all in order" option.

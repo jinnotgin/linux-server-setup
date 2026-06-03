@@ -68,14 +68,8 @@ run_copyparty_setup() {
   fi
 
   echo "Copyparty files rendered under $STACK_DIR."
-  if command -v docker >/dev/null 2>&1; then
-    read -r -p "Launch Copyparty now? (y/N): " run_now
-    if [[ "$run_now" =~ ^[Yy]$ ]]; then
-      $SUDO docker compose -f "$copyparty_dir/docker-compose.yml" up -d
-    fi
-  else
-    echo "Docker was not found. Run scripts/docker-portainer-setup.sh before launching Copyparty."
-  fi
+  echo "To launch: import $copyparty_dir/docker-compose.yml into Portainer as a stack."
+  echo "Copyparty setup complete."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

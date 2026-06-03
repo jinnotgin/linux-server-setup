@@ -99,39 +99,8 @@ install_tailscale() {
   fi
 }
 configure_ufw() {
-  echo "Configuring UFW (with Docker-friendly rules)..."
+  echo "Configuring UFW..."
   $SUDO apt-get install -y ufw
-
-  if ! $SUDO grep -q "BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
-    cat <<'EOS' | $SUDO tee -a /etc/ufw/after.rules >/dev/null
-# BEGIN UFW AND DOCKER
-*filter
-:ufw-user-forward - [0:0]
-:ufw-docker-logging-deny - [0:0]
-:DOCKER-USER - [0:0]
--A DOCKER-USER -j ufw-user-forward
-
--A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
--A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
--A DOCKER-USER -i docker0 -o docker0 -j ACCEPT
-
--A DOCKER-USER -j RETURN -s 10.0.0.0/8
--A DOCKER-USER -j RETURN -s 172.16.0.0/12
--A DOCKER-USER -j RETURN -s 192.168.0.0/16
-
--A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 10.0.0.0/8
--A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 172.16.0.0/12
--A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 192.168.0.0/16
-
--A DOCKER-USER -j RETURN
-
--A ufw-docker-logging-deny -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW DOCKER BLOCK] "
--A ufw-docker-logging-deny -j DROP
-
-COMMIT
-# END UFW AND DOCKER
-EOS
-  fi
 
   $SUDO ufw default deny incoming
   $SUDO ufw default allow outgoing
@@ -142,38 +111,11 @@ EOS
   fi
   for p in "${ssh_ports[@]}"; do
     $SUDO ufw allow "$p"/tcp
-    $SUDO ufw route allow proto tcp from any to any port "$p"
   done
   $SUDO ufw allow ssh
   $SUDO ufw allow http
-  $SUDO ufw route allow proto tcp from any to any port 80
   $SUDO ufw allow https
-  $SUDO ufw route allow proto tcp from any to any port 443
 
-  # Public proxy ports:
-  # - 2053/tcp: gateway router
-  # - 6443/tcp: CDN proxy
-  # - 8443/tcp+udp: Hysteria2 WARP
-  # - 8444/tcp+udp: Hysteria2
-  # - 20011/tcp, 30011/tcp: VLESS direct WARP variants
-  $SUDO ufw allow 2053/tcp
-  $SUDO ufw route allow proto tcp from any to any port 2053
-  $SUDO ufw allow 6443/tcp
-  $SUDO ufw route allow proto tcp from any to any port 6443
-  $SUDO ufw allow 8443/tcp
-  $SUDO ufw allow 8443/udp
-  $SUDO ufw route allow proto tcp from any to any port 8443
-  $SUDO ufw route allow proto udp from any to any port 8443
-  $SUDO ufw allow 8444/tcp
-  $SUDO ufw allow 8444/udp
-  $SUDO ufw route allow proto tcp from any to any port 8444
-  $SUDO ufw route allow proto udp from any to any port 8444
-  $SUDO ufw allow 20011/tcp
-  $SUDO ufw allow 30011/tcp
-  $SUDO ufw route allow proto tcp from any to any port 20011
-  $SUDO ufw route allow proto tcp from any to any port 30011
-
-  # If Tailscale is installed, allow all traffic on the tailscale0 interface
   if command -v tailscale >/dev/null 2>&1; then
     if ip link show tailscale0 >/dev/null 2>&1; then
       echo "Tailscale detected; allowing traffic on tailscale0 interface..."
@@ -194,7 +136,7 @@ run_linux_server_setup() {
   read -r -p "Run system updates, locale, timezone, and sudo user setup? (y/N): " DO_SYSTEM
   read -r -p "Harden SSH/root login? (y/N): " DO_HARDEN
   read -r -p "Install Tailscale with SSH + exit-node enabled? (y/N): " DO_TAILSCALE
-  read -r -p "Configure UFW firewall (HTTP/HTTPS + SSH with Docker rules)? (y/N): " DO_UFW
+  read -r -p "Configure UFW firewall (SSH, HTTP, HTTPS)? (y/N): " DO_UFW
 
   if [[ "$DO_SYSTEM" =~ ^[Yy]$ || "$DO_HARDEN" =~ ^[Yy]$ || "$DO_TAILSCALE" =~ ^[Yy]$ || "$DO_UFW" =~ ^[Yy]$ ]]; then
     prompt_sudo

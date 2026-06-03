@@ -626,6 +626,41 @@ keys, and short IDs — only the port differs.
   echo "The compose expects an existing Docker network named proxy_net."
 }
 
+configure_ufw_tunnel() {
+  echo "Opening UFW ports for tunnel stack..."
+  $SUDO apt-get install -y ufw
+
+  local use_route=false
+  if $SUDO grep -q "BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
+    use_route=true
+  fi
+
+  _open_port() {
+    local proto="$1" port="$2"
+    $SUDO ufw allow "$port/$proto"
+    if [[ "$use_route" == true ]]; then
+      $SUDO ufw route allow proto "$proto" from any to any port "$port"
+    fi
+  }
+
+  # 2053/tcp: gateway router (SNI routing + fallback)
+  _open_port tcp 2053
+  # 6443/tcp: CDN proxy (Nginx HTTPS for VLESS+WS)
+  _open_port tcp 6443
+  # 8443/tcp+udp: Hysteria2 WARP variant
+  _open_port tcp 8443
+  _open_port udp 8443
+  # 8444/tcp+udp: Hysteria2 standard
+  _open_port tcp 8444
+  _open_port udp 8444
+  # 20011/tcp: VLESS Vision WARP direct (bypasses gateway)
+  _open_port tcp 20011
+  # 30011/tcp: VLESS Reality WARP direct (bypasses gateway)
+  _open_port tcp 30011
+
+  $SUDO ufw reload
+}
+
 run_tunnel_stack_setup() {
   echo "--- Tunnel stack setup ---"
   read -r -p "Username that should own rendered stacks (default: $TARGET_USER): " input_user
@@ -639,7 +674,17 @@ run_tunnel_stack_setup() {
     echo "Docker was not found. You can still render stack files, but run scripts/docker-portainer-setup.sh before launching them."
   fi
 
+  read -r -p "Open UFW ports for tunnel stack (2053, 6443, 8443, 8444, 20011, 30011)? (y/N): " DO_UFW_TUNNEL
+
+  if [[ "$DO_UFW_TUNNEL" =~ ^[Yy]$ ]]; then
+    prompt_sudo
+  fi
+
   render_templates
+
+  if [[ "$DO_UFW_TUNNEL" =~ ^[Yy]$ ]]; then
+    configure_ufw_tunnel
+  fi
 
   echo "Tunnel stack setup complete."
 }

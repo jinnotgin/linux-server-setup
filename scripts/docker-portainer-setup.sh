@@ -181,6 +181,61 @@ EOS
   $SUDO systemctl enable --now portainer-backup.timer
 }
 
+configure_ufw_docker() {
+  echo "Adding Docker-friendly UFW rules..."
+  $SUDO apt-get install -y ufw
+
+  if ! $SUDO grep -q "BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
+    cat <<'EOS' | $SUDO tee -a /etc/ufw/after.rules >/dev/null
+# BEGIN UFW AND DOCKER
+*filter
+:ufw-user-forward - [0:0]
+:ufw-docker-logging-deny - [0:0]
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -j ufw-user-forward
+
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+-A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
+-A DOCKER-USER -i docker0 -o docker0 -j ACCEPT
+
+-A DOCKER-USER -j RETURN -s 10.0.0.0/8
+-A DOCKER-USER -j RETURN -s 172.16.0.0/12
+-A DOCKER-USER -j RETURN -s 192.168.0.0/16
+
+-A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 10.0.0.0/8
+-A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 172.16.0.0/12
+-A DOCKER-USER -j ufw-docker-logging-deny -m conntrack --ctstate NEW -d 192.168.0.0/16
+
+-A DOCKER-USER -j RETURN
+
+-A ufw-docker-logging-deny -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW DOCKER BLOCK] "
+-A ufw-docker-logging-deny -j DROP
+
+COMMIT
+# END UFW AND DOCKER
+EOS
+  fi
+
+  # Now that the DOCKER-USER chain is in place, add route rules for base ports
+  local ssh_ports=("22")
+  if [[ -n "${SSH_PORT_SELECTED:-}" && "$SSH_PORT_SELECTED" != "22" ]]; then
+    ssh_ports+=("$SSH_PORT_SELECTED")
+  fi
+  for p in "${ssh_ports[@]}"; do
+    $SUDO ufw route allow proto tcp from any to any port "$p"
+  done
+  $SUDO ufw route allow proto tcp from any to any port 80
+  $SUDO ufw route allow proto tcp from any to any port 443
+
+  # Portainer management ports
+  $SUDO ufw allow 8000/tcp
+  $SUDO ufw allow 9443/tcp
+  $SUDO ufw route allow proto tcp from any to any port 8000
+  $SUDO ufw route allow proto tcp from any to any port 9443
+
+  $SUDO ufw reload
+}
+
 run_docker_portainer_setup() {
   echo "--- Docker + Portainer CE setup ---"
   read -r -p "Username to use for Docker group membership (default: $TARGET_USER): " input_user
@@ -197,15 +252,20 @@ run_docker_portainer_setup() {
   fi
 
   read -r -p "Install Docker Engine, Docker Compose plugin, and Portainer CE? (Y/n): " DO_DOCKER
+  read -r -p "Add Docker-friendly UFW rules and open Portainer ports (8000, 9443)? (y/N): " DO_UFW_DOCKER
   read -r -p "Configure Portainer backups to Google Drive with rclone? (y/N): " DO_BACKUP
 
-  if [[ -z "$DO_DOCKER" || "$DO_DOCKER" =~ ^[Yy]$ || "$DO_BACKUP" =~ ^[Yy]$ ]]; then
+  if [[ -z "$DO_DOCKER" || "$DO_DOCKER" =~ ^[Yy]$ || "$DO_UFW_DOCKER" =~ ^[Yy]$ || "$DO_BACKUP" =~ ^[Yy]$ ]]; then
     prompt_sudo
   fi
 
   if [[ -z "$DO_DOCKER" || "$DO_DOCKER" =~ ^[Yy]$ ]]; then
     install_docker
     install_portainer
+  fi
+
+  if [[ "$DO_UFW_DOCKER" =~ ^[Yy]$ ]]; then
+    configure_ufw_docker
   fi
 
   if [[ "$DO_BACKUP" =~ ^[Yy]$ ]]; then

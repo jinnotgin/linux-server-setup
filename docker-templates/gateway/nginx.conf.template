@@ -20,8 +20,8 @@ stream {
   {{CDN_UPSTREAM_BLOCK}}
 
   server {
-    listen 443 reuseport;
-    listen [::]:443 reuseport;
+    listen {{GATEWAY_LISTEN_PORT}} reuseport;
+    listen [::]:{{GATEWAY_LISTEN_PORT}} reuseport;
     ssl_preread on;
     proxy_pass $upstream_name;
   }

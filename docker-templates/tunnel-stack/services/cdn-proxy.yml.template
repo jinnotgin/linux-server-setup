@@ -1,0 +1,16 @@
+  # Reverse proxy that terminates TLS for the CDN-routed VLESS service
+  cdn-proxy:
+    image: nginx:stable-alpine
+    container_name: cdn-proxy
+    restart: unless-stopped
+    depends_on:
+      tunnel-certbot:
+        condition: service_healthy
+    ports:
+      - "{{NGINX_HTTPS_PORT}}:{{NGINX_HTTPS_PORT}}"
+    volumes:
+      - {{NGINX_CONF_PATH}}:/etc/nginx/nginx.conf:ro
+      - {{HOST_SSL_DIR}}:/certs:ro
+      - {{NGINX_WWW_PATH}}:/usr/share/nginx/html:ro
+    networks:
+      - proxy_net

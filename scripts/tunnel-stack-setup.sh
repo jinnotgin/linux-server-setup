@@ -5,25 +5,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "$SCRIPT_DIR/common.sh"
 
-render_template_file() {
-  local src="$1" dest="$2"
-  shift 2
+render_template() {
+  local src="$1"
+  shift
   if (( $# % 2 != 0 )); then
-    echo "render_template_file received an odd number of key/value args" >&2
+    echo "render_template received an odd number of key/value args" >&2
     return 1
   fi
-  python3 - "$src" "$dest" "$@" <<'PY'
+  python3 - "$src" "$@" <<'PY'
 import sys
-src, dest, *pairs = sys.argv[1:]
+src, *pairs = sys.argv[1:]
 data = open(src, encoding="utf-8").read()
 if len(pairs) % 2:
     sys.exit("Odd number of key/value args")
 for i in range(0, len(pairs), 2):
     key, val = pairs[i], pairs[i+1]
     data = data.replace(f"{{{{{key}}}}}", val)
-with open(dest, "w", encoding="utf-8") as f:
-    f.write(data)
+print(data, end="")
 PY
+}
+render_template_file() {
+  local src="$1" dest="$2"
+  shift 2
+  render_template "$src" "$@" > "$dest"
 }
 read_snippet() {
   local path="$1"
@@ -216,6 +220,8 @@ render_templates() {
   echo "Collecting domain information (supports multiple domains)..."
   collect_domains_with_roles
   read -r -p "Contact email for certificates (used by Certbot/Nginx): " CERT_EMAIL
+  read -r -p "Cloudflare API token for DNS-01 certificate issuance (leave blank to write placeholder): " CLOUDFLARE_API_TOKEN
+  CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-"<token here>"}
 
   local summary="Client setup summary\nGenerated at $(date -Iseconds)\n"
 
@@ -241,12 +247,19 @@ render_templates() {
 
   local SSL_DIR="$STACK_DIR/ssl"
   mkdir -p "$SSL_DIR" "$SSL_DIR/logs"
+  local final_compose="$STACK_DIR/docker-compose.yml"
+  local COMPOSE_TEMPLATE_DIR="$TEMPLATE_DIR/tunnel-stack"
+  local SERVICE_TEMPLATE_DIR="$COMPOSE_TEMPLATE_DIR/services"
+  local compose_services=""
 
-  # Render SSL renewal (covers all selected domains)
-  render_template_file "$TEMPLATE_DIR/ssl/docker-compose.yml.template" \
-    "$STACK_DIR/ssl/docker-compose.yml" \
-    DOMAINS_ARGS "$DOMAINS_ARGS" DOMAINS_CSV "$DOMAINS_CSV" CERT_EMAIL "$CERT_EMAIL" HOST_SSL_DIR "$SSL_DIR" SSL_LOG_DIR "$SSL_DIR/logs" TARGET_UID "$TARGET_UID" TARGET_GID "$TARGET_GID"
-  COMPOSE_OUTPUTS+=("$STACK_DIR/ssl/docker-compose.yml")
+  # Certificate renewal (covers all selected domains) via Cloudflare DNS-01.
+  compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/certbot.yml.template" \
+    HOST_SSL_DIR "$SSL_DIR" \
+    CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN" \
+    CERT_EMAIL "$CERT_EMAIL" \
+    DOMAINS_CSV "$DOMAINS_CSV" \
+    CERT_BASE_DOMAIN "$CERT_BASE_DOMAIN")
+  compose_services+=$'\n\n'
 
   # CDN / VLESS over WS (Cloudflare OK)
   if [[ "$render_cdn" =~ ^[Yy]$ ]]; then
@@ -278,10 +291,12 @@ render_templates() {
       WS_OFFSET_LOCATION "$ws_offset_location" \
       PRIMARY_DOMAIN "$CDN_DOMAIN" TLS_CERT_PATH "$tls_cert_cdn" TLS_KEY_PATH "$tls_key_cdn" \
       VLESS_UPSTREAM "vless-cdn:10000" VLESS_WARP_UPSTREAM "vless-cdn:10001" NGINX_HTTPS_PORT "$nginx_port"
-    render_template_file "$TEMPLATE_DIR/nginx/docker-compose.yml.template" \
-      "$nginx_dir/docker-compose.yml" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" NGINX_HTTPS_PORT "$nginx_port" NGINX_CONF_PATH "$nginx_dir/nginx.conf" NGINX_WWW_PATH "$nginx_dir/www" HOST_SSL_DIR "$SSL_DIR"
-    COMPOSE_OUTPUTS+=("$nginx_dir/docker-compose.yml")
+    compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/cdn-proxy.yml.template" \
+      NGINX_HTTPS_PORT "$nginx_port" \
+      NGINX_CONF_PATH "$nginx_dir/nginx.conf" \
+      HOST_SSL_DIR "$SSL_DIR" \
+      NGINX_WWW_PATH "$nginx_dir/www")
+    compose_services+=$'\n\n'
 
     # IMPORTANT: Snippet placeholders (WS_WARP_INBOUND, WARP_OUTBOUND, ROUTING_BLOCK)
     # must come FIRST so that placeholders inside the snippets (like VLESS_CLIENTS)
@@ -292,10 +307,9 @@ render_templates() {
       WARP_OUTBOUND "$warp_outbound" \
       ROUTING_BLOCK "$routing_block" \
       PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CLIENTS "$VLESS_WS_CLIENTS"
-    render_template_file "$TEMPLATE_DIR/vless-cdn/docker-compose.yml.template" \
-      "$vless_cdn_dir/docker-compose.yml" \
-      PRIMARY_DOMAIN "$CDN_DOMAIN" VLESS_CDN_CONFIG_PATH "$vless_cdn_dir/config.json"
-    COMPOSE_OUTPUTS+=("$vless_cdn_dir/docker-compose.yml")
+    compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/vless-cdn.yml.template" \
+      VLESS_CDN_CONFIG_PATH "$vless_cdn_dir/config.json")
+    compose_services+=$'\n\n'
 
     summary+=$'\n'"CDN VLESS over WebSocket (via $CDN_DOMAIN)"$'\n'
     summary+="  External: https://$CDN_DOMAIN:6443/ws (Cloudflare OK)"$'\n'
@@ -371,11 +385,12 @@ render_templates() {
 
     render_template_file "$TEMPLATE_DIR/gateway/nginx.conf.template" \
       "$gateway_dir/nginx.conf" \
-      CDN_MAP_ENTRY "$cdn_map_entry" CDN_UPSTREAM_BLOCK "$cdn_upstream" DIRECT_DOMAIN "$DIRECT_DOMAIN" VLESS_DIRECT_HOST "$vless_direct_host"
-    render_template_file "$TEMPLATE_DIR/gateway/docker-compose.yml.template" \
-      "$gateway_dir/docker-compose.yml" \
-      DIRECT_DOMAIN "$DIRECT_DOMAIN" GATEWAY_CONF_PATH "$gateway_dir/nginx.conf" GATEWAY_WWW_PATH "$gateway_dir/www"
-    COMPOSE_OUTPUTS+=("$gateway_dir/docker-compose.yml")
+      CDN_MAP_ENTRY "$cdn_map_entry" CDN_UPSTREAM_BLOCK "$cdn_upstream" DIRECT_DOMAIN "$DIRECT_DOMAIN" VLESS_DIRECT_HOST "$vless_direct_host" GATEWAY_LISTEN_PORT "2053"
+    compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/gateway-router.yml.template" \
+      GATEWAY_PORT "2053" \
+      GATEWAY_CONF_PATH "$gateway_dir/nginx.conf" \
+      GATEWAY_WWW_PATH "$gateway_dir/www")
+    compose_services+=$'\n\n'
 
     # VLESS direct (Vision + XHTTP Reality)
     local vless_direct_dir="$STACK_DIR/vless-direct"
@@ -406,11 +421,12 @@ render_templates() {
       REALITY_SHORT_IDS "$sid_json" \
       DIRECT_TLS_CERT "$tls_cert_direct" \
       DIRECT_TLS_KEY "$tls_key_direct" \
-      FALLBACK_DEST "gateway:20002"
-    render_template_file "$TEMPLATE_DIR/vless-direct/docker-compose.yml.template" \
-      "$vless_direct_dir/docker-compose.yml" \
-      VLESS_DIRECT_CONFIG_PATH "$vless_direct_dir/config.json" HOST_SSL_DIR "$SSL_DIR" WARP_PORT_BINDINGS "$warp_port_bindings"
-    COMPOSE_OUTPUTS+=("$vless_direct_dir/docker-compose.yml")
+      FALLBACK_DEST "gateway-router:20002"
+    compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/vless-direct.yml.template" \
+      VLESS_DIRECT_CONFIG_PATH "$vless_direct_dir/config.json" \
+      HOST_SSL_DIR "$SSL_DIR" \
+      WARP_PORT_BINDINGS "$warp_port_bindings")
+    compose_services+=$'\n\n'
 
     # Hysteria2 (direct)
     local hysteria_dir="$STACK_DIR/hysteria2"
@@ -420,34 +436,23 @@ render_templates() {
     local hysteria_warp_service="" hysteria_warp_config_path=""
     if [[ "$enable_warp_variants" == "1" ]]; then
       hysteria_warp_config_path="$hysteria_dir/hysteria-warp.yaml"
-      hysteria_warp_service=$(cat <<EOF
-
-  hysteria2-warp:
-    image: tobyxdd/hysteria:latest
-    container_name: hysteria2-warp
-    restart: unless-stopped
-    ports:
-      - "8443:8443/udp"
-      - "8443:8443/tcp"
-    volumes:
-      - ${hysteria_warp_config_path}:/etc/hysteria.yaml:ro
-      - ${SSL_DIR}:/certs:ro
-    networks:
-      - proxy_net
-    command: ["server", "-c", "/etc/hysteria.yaml"]
-EOF
-)
       render_template_file "$TEMPLATE_DIR/hysteria2/hysteria-warp.yaml.template" \
         "$hysteria_warp_config_path" \
         PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
+      hysteria_warp_service=$(render_template "$SERVICE_TEMPLATE_DIR/hysteria2-warp.yml.template" \
+        HYSTERIA_WARP_CONFIG_PATH "$hysteria_warp_config_path" \
+        HOST_SSL_DIR "$SSL_DIR")
     fi
     render_template_file "$TEMPLATE_DIR/hysteria2/hysteria.yaml.template" \
       "$hysteria_dir/hysteria.yaml" \
       PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" TLS_CERT "$tls_cert_direct" TLS_KEY "$tls_key_direct" MASQUERADE "$MASQ"
-    render_template_file "$TEMPLATE_DIR/hysteria2/docker-compose.yml.template" \
-      "$hysteria_dir/docker-compose.yml" \
-      PRIMARY_DOMAIN "$DIRECT_DOMAIN" HYSTERIA_CONFIG_PATH "$hysteria_dir/hysteria.yaml" HOST_SSL_DIR "$SSL_DIR" HYSTERIA_WARP_SERVICE "$hysteria_warp_service"
-    COMPOSE_OUTPUTS+=("$hysteria_dir/docker-compose.yml")
+    compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/hysteria2.yml.template" \
+      HYSTERIA_CONFIG_PATH "$hysteria_dir/hysteria.yaml" \
+      HOST_SSL_DIR "$SSL_DIR")
+    if [[ -n "$hysteria_warp_service" ]]; then
+      compose_services+=$'\n\n'"$hysteria_warp_service"
+    fi
+    compose_services+=$'\n\n'
 
     summary+=$'\n'"Direct stack (no CDN) via $DIRECT_DOMAIN"$'\n'
     summary+="  Gateway router on 2053 TCP"$'\n'
@@ -477,10 +482,9 @@ EOF
     else
       local health_dir="$STACK_DIR/healthcheck"
       mkdir -p "$health_dir"
-    render_template_file "$TEMPLATE_DIR/healthcheck/docker-compose.yml.template" \
-        "$health_dir/docker-compose.yml" \
-        HEALTHCHECK_URL "$HEALTHCHECK_URL"
-      COMPOSE_OUTPUTS+=("$health_dir/docker-compose.yml")
+      compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/healthcheck.yml.template" \
+        HEALTHCHECK_URL "$HEALTHCHECK_URL")
+      compose_services+=$'\n\n'
       summary+=$'\n'"Healthcheck: curl $HEALTHCHECK_URL every 5 minutes"$'\n'
     fi
   fi
@@ -489,12 +493,17 @@ EOF
   if [[ "$render_warp" =~ ^[Yy]$ ]]; then
     local warp_dir="$STACK_DIR/warp"
     mkdir -p "$warp_dir/data"
-    render_template_file "$TEMPLATE_DIR/warp/docker-compose.yml.template" \
-      "$warp_dir/docker-compose.yml"
-    COMPOSE_OUTPUTS+=("$warp_dir/docker-compose.yml")
+    compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/warp.yml.template" \
+      WARP_DATA_PATH "$warp_dir/data")
+    compose_services+=$'\n\n'
     summary+=$'\n'"WARP proxy internal on warp:1080 (SOCKS5/HTTP with UDP relay)"$'\n'
     summary+="  Data dir: $warp_dir/data"$'\n'
   fi
+
+  render_template_file "$COMPOSE_TEMPLATE_DIR/docker-compose.yml.template" \
+    "$final_compose" \
+    SERVICE_BLOCKS "${compose_services%$'\n'}"
+  COMPOSE_OUTPUTS=("$final_compose")
 
   if [[ -n "$summary" ]]; then
     local summary_file="$STACK_DIR/summary.txt"
@@ -506,7 +515,8 @@ EOF
     ${SUDO:-} chown -R "$TARGET_USER:$TARGET_USER" "$STACK_DIR"
   fi
 
-  echo "Templates rendered under $STACK_DIR. Update ports/paths as needed and run 'docker compose up -d' inside each directory."
+  echo "Rendered Portainer-ready tunnel compose: $final_compose"
+  echo "The compose expects an existing Docker network named proxy_net."
 }
 
 run_tunnel_stack_setup() {
@@ -523,21 +533,6 @@ run_tunnel_stack_setup() {
   fi
 
   render_templates
-
-  if command -v docker >/dev/null 2>&1 && [[ ${#COMPOSE_OUTPUTS[@]} -gt 0 ]]; then
-    ensure_proxy_network
-    read -r -p "Run any rendered docker-compose stacks now? (y/N): " RUN_TEMPLATES
-    if [[ "$RUN_TEMPLATES" =~ ^[Yy]$ ]]; then
-      for compose_file in "${COMPOSE_OUTPUTS[@]}"; do
-        if [[ -f "$compose_file" ]]; then
-          read -r -p "Launch stack from $(realpath "$compose_file")? (y/N): " run_this
-          if [[ "$run_this" =~ ^[Yy]$ ]]; then
-            $SUDO docker compose -f "$compose_file" up -d
-          fi
-        fi
-      done
-    fi
-  fi
 
   echo "Tunnel stack setup complete."
 }

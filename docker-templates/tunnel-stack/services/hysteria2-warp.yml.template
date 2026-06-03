@@ -1,0 +1,17 @@
+  # Hysteria2 server - outbound routed through WARP
+  hysteria2-warp:
+    image: tobyxdd/hysteria:latest
+    container_name: hysteria2-warp
+    restart: unless-stopped
+    depends_on:
+      tunnel-certbot:
+        condition: service_healthy
+    ports:
+      - "8443:8443/udp"
+      - "8443:8443/tcp"
+    volumes:
+      - {{HYSTERIA_WARP_CONFIG_PATH}}:/etc/hysteria.yaml:ro
+      - {{HOST_SSL_DIR}}:/certs:ro
+    networks:
+      - proxy_net
+    command: ["server", "-c", "/etc/hysteria.yaml"]

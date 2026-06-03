@@ -18,7 +18,7 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 - General Linux setup can update packages, install common packages, set locale to `en_US.UTF-8`, set timezone to `Asia/Singapore`, create/ensure a sudo user, harden SSH, install Tailscale, and configure UFW.
 - Docker setup can install Docker Engine + Compose plugin, deploy Portainer CE (`portainer/portainer-ce`) on ports `8000` and `9443`, and configure daily Portainer backups.
 - Portainer backups use `rclone config` with Google Drive OAuth and a remote named `portainer_gdrive`.
-- Tunnel stack setup renders Docker Compose templates with your inputs under `~/tunnel-stack` and can start the stacks after rendering if Docker is present.
+- Tunnel stack setup renders one Portainer-ready Docker Compose file with your inputs under `~/tunnel-stack/docker-compose.yml`. It does not launch Docker Compose for you.
 - Copyparty setup renders its Docker Compose files under `~/copyparty-stack`.
 
 ## Usage
@@ -56,26 +56,26 @@ Run as root or a sudo-capable user. The scripts will prompt for:
 See [`docs/portainer-backup.md`](docs/portainer-backup.md) for details on how the daily backup works and how to restore from the archives.
 
 ## Template overview (`docker-templates/`)
-- The tunnel script renders stacks under `~/tunnel-stack` with user ownership:
-  - **ssl**: `nbraun1/certbot` with cron renewal; certs/logs live in `~/tunnel-stack/ssl` (mounted as `/etc/letsencrypt`), binds port 80.
+- The tunnel script renders one stack compose under `~/tunnel-stack/docker-compose.yml` with user ownership:
+  - **tunnel-certbot**: `serversideup/certbot-dns-cloudflare` using Cloudflare DNS-01; certs live in `~/tunnel-stack/ssl` (mounted as `/etc/letsencrypt`), so port 80 is not needed.
   - **cdn-proxy (Nginx)**: reverse proxy for the CDN domain using certs from `~/tunnel-stack/ssl` (mounted as `/certs`), proxies `/ws` to VLESS WS over `proxy_net`; listens on public port `6443`.
   - **vless-cdn**: `ghcr.io/xtls/xray-core:latest` serving VLESS over WebSocket (TLS offloaded at `cdn-proxy`); multiple UUID clients supported.
-  - **gateway**: Nginx stream router on public port `2053` SNI-routing to CDN (vless-cdn), Direct Vision, and XHTTP Reality; serves the Vision fallback site on 20002.
+  - **gateway-router**: Nginx stream router on public port `2053` SNI-routing to CDN (vless-cdn), Direct Vision, and XHTTP Reality; serves the Vision fallback site on 20002.
   - **vless-direct**: `ghcr.io/xtls/xray-core:latest` with VLESS Vision (XTLS) + VLESS XHTTP Reality, using the Direct domain cert from `/certs`.
   - **hysteria2**: single-password Hysteria2 using the Direct domain cert; masquerade target configurable.
   - **healthcheck**: tiny curl container that pings a user URL every 5 minutes (healthchecks.io-friendly).
 - The Copyparty script renders a separate file-server stack under `~/copyparty-stack`; default port 3923.
 
-After rendering, you can let the script start the generated stacks automatically (if Docker is installed), or start them yourself with `docker compose up -d` from each generated directory.
+After rendering, import `~/tunnel-stack/docker-compose.yml` into Portainer or run it yourself later. The setup script intentionally does not run Docker Compose.
 
 ## Notes
 - SSH hardening disables password logins. Ensure you have SSH keys configured before running the script remotely.
 - The script backs up `/etc/ssh/sshd_config` before applying changes.
-- The Certbot stack binds port 80; ensure it is free when you run it. The gateway binds public port `2053`, the CDN proxy binds public port `6443`, Hysteria2 WARP binds public port `8443` TCP/UDP, and Hysteria2 binds public port `8444` TCP/UDP.
+- Certbot uses Cloudflare DNS-01 and does not bind port 80. The gateway binds public port `2053`, the CDN proxy binds public port `6443`, Hysteria2 WARP binds public port `8443` TCP/UDP, and Hysteria2 binds public port `8444` TCP/UDP.
 - Keep the CDN domain behind Cloudflare only for VLESS+WS. The Direct domain must not sit behind a CDN for Vision/XHTTP Reality/Hysteria2 to work.
-- Before starting the Nginx or VLESS stacks, create the shared Docker network with `docker network create proxy_net` (the script will also create it automatically if Docker is available when you choose to auto-start stacks).
+- Before starting the Portainer stack, create the shared Docker network with `docker network create proxy_net` or create an equivalent external network in Portainer.
 - Hysteria2 uses a generated password; update it in `~/tunnel-stack/hysteria2/hysteria.yaml` if you want a custom value.
-- Tunnel templates and SSL material are rendered under the selected user's home directory (`~/tunnel-stack` with `~/tunnel-stack/ssl` for certs) with user ownership. Compose files use absolute paths into that folder.
+- Tunnel config files and SSL material are rendered under the selected user's home directory (`~/tunnel-stack` with `~/tunnel-stack/ssl` for certs) with user ownership. The generated compose file uses absolute paths into that folder.
 - A summary of client-facing tunnel details is written to `~/tunnel-stack/summary.txt` after rendering.
 
 ## Nginx content seeding

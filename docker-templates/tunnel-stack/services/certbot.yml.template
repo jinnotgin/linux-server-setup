@@ -1,5 +1,5 @@
-version: "3.9"
-services:
+  # Auto-renews Let's Encrypt TLS certificates via Cloudflare DNS challenge
+  # No port 80 needed
   tunnel-certbot:
     image: serversideup/certbot-dns-cloudflare
     container_name: tunnel-certbot

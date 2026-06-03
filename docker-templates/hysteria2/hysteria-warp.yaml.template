@@ -24,7 +24,6 @@ outbounds:
   - name: warp
     type: socks5
     socks5:
-      addr: warp
-      port: 1080
+      addr: warp:1080
   - name: direct
     type: direct

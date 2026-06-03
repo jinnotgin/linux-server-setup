@@ -876,7 +876,7 @@ EOF
     render_template_file "$TEMPLATE_DIR/warp/docker-compose.yml.template" \
       "$warp_dir/docker-compose.yml"
     COMPOSE_OUTPUTS+=("$warp_dir/docker-compose.yml")
-    summary+=$'\n'"WARP proxy on 1080 (SOCKS5/HTTP with UDP relay)"$'\n'
+    summary+=$'\n'"WARP proxy internal on warp:1080 (SOCKS5/HTTP with UDP relay)"$'\n'
     summary+="  Data dir: $warp_dir/data"$'\n'
   fi
 

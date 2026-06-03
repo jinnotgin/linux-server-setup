@@ -5,8 +5,8 @@ services:
     container_name: hysteria2
     restart: unless-stopped
     ports:
-      - "8443:8443/udp"
-      - "8443:8443/tcp"
+      - "8444:8444/udp"
+      - "8444:8444/tcp"
     volumes:
       - {{HYSTERIA_CONFIG_PATH}}:/etc/hysteria.yaml:ro
       - {{HOST_SSL_DIR}}:/certs:ro

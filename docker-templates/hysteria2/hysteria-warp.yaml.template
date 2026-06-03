@@ -1,4 +1,4 @@
-listen: :8444
+listen: :8443
 
 tls:
   cert: {{TLS_CERT}}

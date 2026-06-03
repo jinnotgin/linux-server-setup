@@ -501,10 +501,36 @@ EOS
   fi
   for p in "${ssh_ports[@]}"; do
     $SUDO ufw allow "$p"/tcp
+    $SUDO ufw route allow proto tcp from any to any port "$p"
   done
   $SUDO ufw allow ssh
   $SUDO ufw allow http
+  $SUDO ufw route allow proto tcp from any to any port 80
   $SUDO ufw allow https
+  $SUDO ufw route allow proto tcp from any to any port 443
+
+  # Public proxy ports:
+  # - 2053/tcp: gateway router
+  # - 6443/tcp: CDN proxy
+  # - 8443/tcp+udp: Hysteria2 WARP
+  # - 8444/tcp+udp: Hysteria2
+  # - 20011/tcp, 30011/tcp: VLESS direct WARP variants
+  $SUDO ufw allow 2053/tcp
+  $SUDO ufw route allow proto tcp from any to any port 2053
+  $SUDO ufw allow 6443/tcp
+  $SUDO ufw route allow proto tcp from any to any port 6443
+  $SUDO ufw allow 8443/tcp
+  $SUDO ufw allow 8443/udp
+  $SUDO ufw route allow proto tcp from any to any port 8443
+  $SUDO ufw route allow proto udp from any to any port 8443
+  $SUDO ufw allow 8444/tcp
+  $SUDO ufw allow 8444/udp
+  $SUDO ufw route allow proto tcp from any to any port 8444
+  $SUDO ufw route allow proto udp from any to any port 8444
+  $SUDO ufw allow 20011/tcp
+  $SUDO ufw allow 30011/tcp
+  $SUDO ufw route allow proto tcp from any to any port 20011
+  $SUDO ufw route allow proto tcp from any to any port 30011
 
   # If Tailscale is installed, allow all traffic on the tailscale0 interface
   if command -v tailscale >/dev/null 2>&1; then
@@ -652,10 +678,7 @@ render_templates() {
       ws_offset_location=$'\n'"$(read_snippet "$SNIPPET_DIR/nginx-ws-offset-location.conf")"$'\n'
     fi
 
-    local nginx_port="443"
-    if [[ "$render_direct" =~ ^[Yy]$ ]]; then
-      nginx_port="6443"
-    fi
+    local nginx_port="6443"
 
     seed_nginx_site "$nginx_dir/www"
     render_template_file "$TEMPLATE_DIR/nginx/nginx.conf.template" \
@@ -683,11 +706,11 @@ render_templates() {
     COMPOSE_OUTPUTS+=("$vless_cdn_dir/docker-compose.yml")
 
     summary+=$'\n'"CDN VLESS over WebSocket (via $CDN_DOMAIN)"$'\n'
-    summary+="  External: https://$CDN_DOMAIN:443/ws (Cloudflare OK)"$'\n'
+    summary+="  External: https://$CDN_DOMAIN:6443/ws (Cloudflare OK)"$'\n'
     if [[ "$render_warp_variants" =~ ^[Yy]$ ]]; then
-      summary+="  Warp egress path: https://$CDN_DOMAIN:443/ws-offset"$'\n'
+      summary+="  Warp egress path: https://$CDN_DOMAIN:6443/ws-offset"$'\n'
     fi
-    summary+="  Internal TLS port (if gateway enabled): $nginx_port"$'\n'
+    summary+="  CDN proxy TLS port: $nginx_port"$'\n'
     summary+="  UUIDs: $VLESS_WS_IDS"$'\n'
     summary+="  TLS cert/key: $tls_cert_cdn | $tls_key_cdn"$'\n'
   fi
@@ -812,8 +835,8 @@ render_templates() {
     container_name: hysteria2-warp
     restart: unless-stopped
     ports:
-      - "8444:8444/udp"
-      - "8444:8444/tcp"
+      - "8443:8443/udp"
+      - "8443:8443/tcp"
     volumes:
       - ${hysteria_warp_config_path}:/etc/hysteria.yaml:ro
       - ${SSL_DIR}:/certs:ro
@@ -835,8 +858,9 @@ EOF
     COMPOSE_OUTPUTS+=("$hysteria_dir/docker-compose.yml")
 
     summary+=$'\n'"Direct stack (no CDN) via $DIRECT_DOMAIN"$'\n'
-    summary+="  VLESS Vision (XTLS) on 443 SNI=$DIRECT_DOMAIN, UUIDs: $VISION_IDS"$'\n'
-    summary+="  VLESS XHTTP Reality on 443 path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
+    summary+="  Gateway router on 2053 TCP"$'\n'
+    summary+="  VLESS Vision (XTLS) via gateway SNI=$DIRECT_DOMAIN, UUIDs: $VISION_IDS"$'\n'
+    summary+="  VLESS XHTTP Reality via gateway path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
     summary+="    SNI: $REALITY_SNI_INPUT"$'\n'
     if [[ "$reality_pub" == "REPLACE_WITH_PUBLIC_KEY" ]]; then
       summary+="    Public key (Xray prints this as 'Password'): NOT GENERATED (install docker and run 'docker run --rm ghcr.io/xtls/xray-core:latest x25519')"$'\n'
@@ -845,9 +869,9 @@ EOF
     fi
     summary+="    Short IDs: $(IFS=', '; echo "${REALITY_SHORT_LIST[*]}")"$'\n'
     summary+="    UUIDs: $REALITY_IDS"$'\n'
-    summary+="  Hysteria2 on 8443 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
+    summary+="  Hysteria2 on 8444 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
     if [[ "$enable_warp_variants" == "1" ]]; then
-      summary+="  Hysteria2 WARP egress on 8444 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
+      summary+="  Hysteria2 WARP egress on 8443 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
       summary+="  Warp variants: VLESS Vision on 20011, Reality on 30011 (egress via WARP), same UUIDs"$'\n'
     fi
     summary+="  TLS cert/key: $tls_cert_direct | $tls_key_direct"$'\n'

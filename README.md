@@ -9,7 +9,7 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 - `scripts/media-stack-setup.sh`: Jellyfin + Radarr + Sonarr + Prowlarr + Byparr + Profilarr stack rendering, with optional SMB/CIFS mount setup and HTTPS via Cloudflare DNS-01.
 - `scripts/healthcheck-setup.sh`: host-level healthchecks.io uptime ping using a systemd service and timer.
 
-`setup.sh` is a launcher that lets you run one purpose script or run all of them in order.
+`setup.sh` is a launcher that lets you run one purpose script, a comma-separated set of scripts in the order you choose, or all purpose scripts in order.
 
 ## Domain roles (Cloudflare vs direct)
 - Provide one or two domains. With one domain, pick a mode: **CDN** (Cloudflare OK) for VLESS over WebSocket only, or **Direct** (no CDN) for Hysteria2 + VLESS Vision + VLESS XHTTP Reality.
@@ -17,6 +17,7 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 
 ## What the script does
 - Requests sudo when privileged steps are selected.
+- Best-effort optional steps warn and continue where safe; warnings are written to the setup log. Required inputs and template rendering errors still stop the selected setup because continuing would create incomplete files.
 - General Linux setup can update packages, install common packages, set locale to `en_US.UTF-8`, set timezone to `Asia/Singapore`, create/ensure a sudo user, harden SSH, install Tailscale, configure UFW, and install a host-level healthchecks.io uptime ping.
 - Docker setup can install Docker Engine + Compose plugin, deploy Portainer CE (`portainer/portainer-ce`) on ports `8000` and `9443`, optionally add Docker-friendly UFW rules (`DOCKER-USER` chain in `after.rules`) and open Portainer ports, and configure daily Portainer backups.
 - Portainer backups use `rclone config` with Google Drive OAuth and a remote named `portainer_gdrive`.
@@ -31,6 +32,14 @@ git clone https://github.com/jinnotgin/linux-server-setup.git
 cd linux-server-setup
 chmod +x setup.sh
 ./setup.sh
+```
+
+The launcher accepts one option or a comma-separated list:
+
+```text
+1       # General Linux server setup
+1,2,4   # Run Linux setup, Docker/Portainer, then tunnel stack setup
+6       # Run all purpose setups in order
 ```
 
 You can also run a purpose script directly:
@@ -51,13 +60,14 @@ If you download only the launcher with `wget` or `curl`, also download the `scri
 
 Run as root or a sudo-capable user. The scripts will prompt for:
 - Which purpose setup to run.
+- One option or comma-separated options when using `setup.sh`.
 - Sudo password (if needed).
 - The username to create/ensure, and a password if the user is being created.
 - Optional interactive `rclone config` for the Google Drive remote used by Portainer backups.
 - Domain names, email, UUIDs, and other template parameters if you choose to render templates.
 - Optional healthchecks.io ping URL for host uptime monitoring.
 
-Each setup script writes a lightweight finished log under `~/linux-server-setup-logs/` with the selected options, generated files, and follow-up notes.
+Each setup script writes a lightweight finished log under the selected user's `~/linux-server-setup-logs/` with the selected options, generated files, warnings, and follow-up notes. If the selected user's home directory cannot be found, the log falls back to the current user's home directory.
 
 > Re-login after the script finishes so the chosen user picks up new group memberships (sudo/docker).
 
@@ -84,7 +94,7 @@ After rendering, import `~/tunnel-stack/docker-compose.yml` into Portainer or ru
 - Before starting the Portainer stack, create the shared Docker network with `docker network create proxy_net` or create an equivalent external network in Portainer.
 - Hysteria2 uses a generated password; update it in `~/tunnel-stack/hysteria2/hysteria.yaml` if you want a custom value.
 - Tunnel config files and SSL material are rendered under the selected user's home directory (`~/tunnel-stack` with `~/tunnel-stack/ssl` for certs) with user ownership. The generated compose file uses absolute paths into that folder.
-- A summary of client-facing tunnel details is written to `~/tunnel-stack/summary.txt` after rendering.
+- A client-facing tunnel README with generated connection details is written to `~/tunnel-stack/README.md` after rendering.
 
 ## Nginx content seeding
 When rendering tunnel templates, the script can optionally download a static 2048 game (from `jinnotgin/2048`) into `~/tunnel-stack/nginx/www` (CDN site) and `~/tunnel-stack/gateway/www` (Vision fallback site). If you skip the download, a simple placeholder page is written to the respective `www` directories; replace it with your own site files at any time.

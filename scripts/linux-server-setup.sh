@@ -9,17 +9,17 @@ source "$SCRIPT_DIR/healthcheck-setup.sh"
 
 update_system() {
   echo "Updating apt package lists and upgrading packages..."
-  $SUDO apt-get update -y
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+  $SUDO apt-get update -y || return 1
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y || return 1
 }
 configure_locale_timezone() {
   echo "Configuring locale to en_US.UTF-8 and timezone to Asia/Singapore..."
-  $SUDO apt-get install -y locales tzdata
-  $SUDO locale-gen en_US.UTF-8
-  $SUDO update-locale LANG=en_US.UTF-8
-  $SUDO timedatectl set-timezone Asia/Singapore
+  apt_install_best_effort locales tzdata
+  $SUDO locale-gen en_US.UTF-8 || return 1
+  $SUDO update-locale LANG=en_US.UTF-8 || return 1
+  $SUDO timedatectl set-timezone Asia/Singapore || return 1
 }
-ensure_user() {
+ensure_linux_user() {
   local username="$1"
 
   if id -u "$username" >/dev/null 2>&1; then
@@ -35,14 +35,14 @@ ensure_user() {
     $SUDO passwd "$username"
   fi
 
-  $SUDO usermod -aG sudo "$username"
-  echo "$username ALL=(ALL) ALL" | $SUDO tee /etc/sudoers.d/"$username" >/dev/null
-  $SUDO chmod 440 /etc/sudoers.d/"$username"
+  $SUDO usermod -aG sudo "$username" || return 1
+  echo "$username ALL=(ALL) ALL" | $SUDO tee /etc/sudoers.d/"$username" >/dev/null || return 1
+  $SUDO chmod 440 /etc/sudoers.d/"$username" || return 1
 }
 harden_ssh() {
   echo "Hardening SSH configuration..."
   local sshd_config=/etc/ssh/sshd_config
-  $SUDO cp "$sshd_config" "${sshd_config}.bak.$(date +%Y%m%d%H%M%S)"
+  $SUDO cp "$sshd_config" "${sshd_config}.bak.$(date +%Y%m%d%H%M%S)" || return 1
 
   read -r -p "SSH port to use (default: 226): " ssh_port
   ssh_port=${ssh_port:-226}
@@ -57,80 +57,88 @@ harden_ssh() {
     -e 's/^#?PermitEmptyPasswords.*/PermitEmptyPasswords no/' \
     -e 's/^#?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' \
     -e 's/^#?X11Forwarding.*/X11Forwarding no/' \
-    "$sshd_config"
+    "$sshd_config" || return 1
 
   if ! grep -q '^Protocol 2' "$sshd_config"; then
-    echo 'Protocol 2' | $SUDO tee -a "$sshd_config" >/dev/null
+    echo 'Protocol 2' | $SUDO tee -a "$sshd_config" >/dev/null || return 1
   fi
 
   if [[ -n "$ssh_port" ]]; then
     SSH_PORT_SELECTED="$ssh_port"
     if grep -qE '^#?Port ' "$sshd_config"; then
-      $SUDO sed -i -E "s/^#?Port .*/Port $ssh_port/" "$sshd_config"
+      $SUDO sed -i -E "s/^#?Port .*/Port $ssh_port/" "$sshd_config" || return 1
     else
-      echo "Port $ssh_port" | $SUDO tee -a "$sshd_config" >/dev/null
+      echo "Port $ssh_port" | $SUDO tee -a "$sshd_config" >/dev/null || return 1
     fi
     echo "SSH will listen on port $ssh_port (remember to adjust firewall)."
   fi
 
-  $SUDO systemctl restart sshd
+  $SUDO systemctl restart sshd || return 1
 }
 install_common_packages() {
   echo "Installing base dependencies..."
-  $SUDO apt-get install -y \
+  apt_install_best_effort \
     ca-certificates curl gnupg lsb-release software-properties-common ufw sudo jq uuid-runtime
 }
 install_tailscale() {
   echo "Installing Tailscale and enabling SSH + exit-node advertising..."
   if ! command -v curl >/dev/null 2>&1; then
     $SUDO apt-get update -y
-    $SUDO apt-get install -y curl
+    apt_install_best_effort curl
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required to install Tailscale." >&2
+    return 1
   fi
 
-  curl -fsSL https://tailscale.com/install.sh | $SUDO sh
-  $SUDO systemctl enable --now tailscaled
+  curl -fsSL https://tailscale.com/install.sh | $SUDO sh || return 1
+  $SUDO systemctl enable --now tailscaled || return 1
 
   # Pre-set preferences as requested
-  $SUDO tailscale set --ssh --advertise-exit-node
+  $SUDO tailscale set --ssh --advertise-exit-node || return 1
 
   read -r -p "Tailscale auth key (tskey-..., leave blank to skip bringing the node up now): " tailscale_key
   if [[ -n "$tailscale_key" ]]; then
-    $SUDO tailscale up --auth-key="$tailscale_key" --advertise-exit-node
+    $SUDO tailscale up --auth-key="$tailscale_key" --advertise-exit-node || return 1
   else
     echo "Skipped 'tailscale up'; run 'sudo tailscale up --auth-key=... --advertise-exit-node' later."
   fi
 }
 configure_ufw() {
   echo "Configuring UFW..."
-  $SUDO apt-get install -y ufw
+  apt_install_best_effort ufw
+  if ! have_command ufw; then
+    echo "ufw is not installed; skipping firewall configuration." >&2
+    return 1
+  fi
 
-  $SUDO ufw default deny incoming
-  $SUDO ufw default allow outgoing
+  $SUDO ufw default deny incoming || return 1
+  $SUDO ufw default allow outgoing || return 1
 
   local ssh_ports=("22")
   if [[ -n "$SSH_PORT_SELECTED" && "$SSH_PORT_SELECTED" != "22" ]]; then
     ssh_ports+=("$SSH_PORT_SELECTED")
   fi
   for p in "${ssh_ports[@]}"; do
-    $SUDO ufw allow "$p"/tcp
+    $SUDO ufw allow "$p"/tcp || return 1
   done
-  $SUDO ufw allow ssh
-  $SUDO ufw allow http
-  $SUDO ufw allow https
+  $SUDO ufw allow ssh || return 1
+  $SUDO ufw allow http || return 1
+  $SUDO ufw allow https || return 1
 
   if command -v tailscale >/dev/null 2>&1; then
     if ip link show tailscale0 >/dev/null 2>&1; then
       echo "Tailscale detected; allowing traffic on tailscale0 interface..."
-      $SUDO ufw allow in on tailscale0
-      $SUDO ufw allow out on tailscale0
+      $SUDO ufw allow in on tailscale0 || return 1
+      $SUDO ufw allow out on tailscale0 || return 1
     else
       echo "Tailscale installed but tailscale0 interface not yet active."
       echo "Run 'sudo ufw allow in on tailscale0 && sudo ufw allow out on tailscale0 && sudo ufw reload' after 'tailscale up'."
     fi
   fi
 
-  $SUDO ufw --force enable
-  $SUDO ufw reload
+  $SUDO ufw --force enable || return 1
+  $SUDO ufw reload || return 1
 }
 
 run_linux_server_setup() {
@@ -155,11 +163,10 @@ run_linux_server_setup() {
     append_setup_log "Tailscale selected: \`$DO_TAILSCALE\`."
     append_setup_log "UFW selected: \`$DO_UFW\`."
     append_setup_log "Host healthcheck selected: \`$DO_HEALTHCHECK\`."
-    update_system
-    install_common_packages
-    configure_locale_timezone
-    ensure_user "$TARGET_USER"
-    append_setup_log "Updated packages, installed common dependencies, configured locale/timezone, and ensured sudo user."
+    run_step "System update" update_system
+    run_step "Base dependency install" install_common_packages
+    run_step "Locale/timezone configuration" configure_locale_timezone
+    run_step "Sudo user setup" ensure_linux_user "$TARGET_USER"
   else
     read -r -p "Username to use for server ownership/settings (default: $TARGET_USER): " input_user
     TARGET_USER=${input_user:-$TARGET_USER}
@@ -167,7 +174,11 @@ run_linux_server_setup() {
       read -r -p "User '$TARGET_USER' does not exist. Create it now? (y/N): " create_user_choice
       if [[ "$create_user_choice" =~ ^[Yy]$ ]]; then
         prompt_sudo
-        ensure_user "$TARGET_USER"
+        run_step "Sudo user setup" ensure_linux_user "$TARGET_USER"
+        if ! id -u "$TARGET_USER" >/dev/null 2>&1; then
+          warn_continue "User '$TARGET_USER' still does not exist after setup attempt; continuing as current user '$(whoami)'."
+          TARGET_USER="$(whoami)"
+        fi
       else
         echo "User '$TARGET_USER' not found; continuing as current user '$(whoami)'."
         TARGET_USER="$(whoami)"
@@ -183,23 +194,21 @@ run_linux_server_setup() {
   fi
 
   if [[ "$DO_HARDEN" =~ ^[Yy]$ ]]; then
-    harden_ssh
-    append_setup_log "Hardened SSH configuration. Selected SSH port: \`${SSH_PORT_SELECTED:-existing}\`."
+    run_step "SSH hardening" harden_ssh
+    append_setup_log "Selected SSH port after hardening step: \`${SSH_PORT_SELECTED:-existing}\`."
   fi
 
   if [[ "$DO_TAILSCALE" =~ ^[Yy]$ ]]; then
-    install_tailscale
-    append_setup_log "Installed and enabled Tailscale."
+    run_step "Tailscale install" install_tailscale
   fi
 
   if [[ "$DO_UFW" =~ ^[Yy]$ ]]; then
-    configure_ufw
-    append_setup_log "Configured UFW defaults and opened SSH, HTTP, and HTTPS."
+    run_step "UFW configuration" configure_ufw
   fi
 
   if [[ "$DO_HEALTHCHECK" =~ ^[Yy]$ ]]; then
     read -r -p "healthchecks.io ping URL: " HEALTHCHECK_URL
-    install_host_healthcheck "$HEALTHCHECK_URL"
+    run_step_strict "Host healthcheck install" install_host_healthcheck "$HEALTHCHECK_URL"
   fi
 
   finish_setup_log

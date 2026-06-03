@@ -59,7 +59,11 @@ setup_smb_mount() {
 
   prompt_sudo
 
-  $SUDO apt-get install -y cifs-utils
+  apt_install_best_effort cifs-utils
+  if ! have_command mount.cifs; then
+    echo "cifs-utils is required for SMB mounting." >&2
+    return 1
+  fi
 
   # Store credentials in a root-only file
   local creds_file="/etc/smb-credentials-$NAS_HOSTNAME"
@@ -89,7 +93,11 @@ setup_smb_mount() {
 
 configure_ufw_media() {
   echo "Opening UFW port 443/tcp for nginx-media..."
-  $SUDO apt-get install -y ufw
+  apt_install_best_effort ufw
+  if ! have_command ufw; then
+    echo "ufw is not installed; skipping media firewall configuration." >&2
+    return 1
+  fi
 
   local use_route=false
   if $SUDO grep -q "BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
@@ -221,8 +229,7 @@ run_media_stack_setup() {
   append_setup_log "Rendered nginx config: \`$NGINX_CONF_PATH\`."
 
   if [[ "$DO_UFW_MEDIA" =~ ^[Yy]$ ]]; then
-    configure_ufw_media
-    append_setup_log "Opened UFW port 443/tcp for nginx-media."
+    run_step_strict "Media UFW configuration" configure_ufw_media
   fi
 
   echo "To launch: import $STACK_DIR/docker-compose.yml into Portainer as a stack."

@@ -612,7 +612,11 @@ keys, and short IDs — only the port differs.
 
 configure_ufw_tunnel() {
   echo "Opening UFW ports for tunnel stack..."
-  $SUDO apt-get install -y ufw
+  apt_install_best_effort ufw
+  if ! have_command ufw; then
+    echo "ufw is not installed; skipping tunnel firewall configuration." >&2
+    return 1
+  fi
 
   local use_route=false
   if $SUDO grep -q "BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
@@ -677,8 +681,7 @@ run_tunnel_stack_setup() {
   fi
 
   if [[ "$DO_UFW_TUNNEL" =~ ^[Yy]$ ]]; then
-    configure_ufw_tunnel
-    append_setup_log "Opened UFW ports for tunnel stack."
+    run_step_strict "Tunnel UFW configuration" configure_ufw_tunnel
   fi
 
   finish_setup_log

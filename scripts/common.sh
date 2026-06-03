@@ -24,11 +24,55 @@ ensure_command() {
     exit 1
   fi
 }
+have_command() {
+  local name="$1"
+  command -v "$name" >/dev/null 2>&1 ||
+    [[ -x "/usr/sbin/$name" || -x "/sbin/$name" || -x "/usr/bin/$name" || -x "/bin/$name" ]]
+}
 prompt_sudo() {
   if [[ -n "$SUDO" ]]; then
     echo "Requesting sudo access (you may be prompted for your password)..."
     $SUDO -v
   fi
+}
+warn_continue() {
+  echo "WARNING: $*" >&2
+  append_setup_log "WARNING: $*"
+}
+run_step() {
+  local description="$1"
+  shift
+  if "$@"; then
+    append_setup_log "$description completed."
+  else
+    warn_continue "$description failed; continuing with the remaining selected steps."
+    return 0
+  fi
+}
+run_step_strict() {
+  local description="$1"
+  shift
+  if ( set -e; "$@" ); then
+    append_setup_log "$description completed."
+  else
+    warn_continue "$description failed; continuing with the remaining selected steps."
+    return 0
+  fi
+}
+apt_install_best_effort() {
+  if $SUDO apt-get install -y "$@"; then
+    return 0
+  fi
+
+  warn_continue "Bulk package install failed; retrying packages one at a time."
+  local package
+  for package in "$@"; do
+    if $SUDO apt-get install -y "$package"; then
+      append_setup_log "Installed package: \`$package\`."
+    else
+      warn_continue "Could not install package \`$package\`; it may be unavailable for this distribution."
+    fi
+  done
 }
 gen_uuid() {
   if command -v uuidgen >/dev/null 2>&1; then
@@ -54,7 +98,14 @@ gen_short_id() {
 init_setup_log() {
   local name="$1" owner="${2:-$TARGET_USER}" owner_home log_dir timestamp
   timestamp=$(date +%Y%m%d-%H%M%S)
-  owner_home=$(eval echo "~$owner" 2>/dev/null || echo "$HOME")
+  if owner_home=$(getent passwd "$owner" 2>/dev/null | cut -d: -f6) && [[ -n "$owner_home" ]]; then
+    :
+  elif [[ "$owner" == "$(whoami)" ]]; then
+    owner_home="$HOME"
+  else
+    warn_continue "Home directory for user \`$owner\` was not found; writing setup log under \`$HOME\`."
+    owner_home="$HOME"
+  fi
   log_dir="$owner_home/linux-server-setup-logs"
   if ! mkdir -p "$log_dir" 2>/dev/null; then
     log_dir="$HOME/linux-server-setup-logs"

@@ -17,7 +17,11 @@ install_host_healthcheck() {
   fi
 
   echo "Installing host-level healthcheck timer..."
-  $SUDO apt-get install -y curl
+  apt_install_best_effort curl
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required for the host healthcheck timer." >&2
+    return 1
+  fi
 
   $SUDO install -m 0755 -d /etc/linux-server-setup
   printf "HEALTHCHECK_URL='%s'\n" "$healthcheck_url" | $SUDO tee /etc/linux-server-setup/healthcheck.env >/dev/null
@@ -72,7 +76,7 @@ run_healthcheck_setup() {
   fi
 
   prompt_sudo
-  install_host_healthcheck "$HEALTHCHECK_URL"
+  run_step_strict "Host healthcheck install" install_host_healthcheck "$HEALTHCHECK_URL"
   finish_setup_log
   echo "Host healthcheck setup complete."
 }

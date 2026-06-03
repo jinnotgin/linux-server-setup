@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "$SCRIPT_DIR/common.sh"
 
-ensure_user() {
+ensure_docker_user() {
   local username="$1"
 
   if id -u "$username" >/dev/null 2>&1; then
@@ -21,9 +21,9 @@ ensure_user() {
     $SUDO passwd "$username"
   fi
 
-  $SUDO usermod -aG sudo "$username"
-  echo "$username ALL=(ALL) ALL" | $SUDO tee /etc/sudoers.d/"$username" >/dev/null
-  $SUDO chmod 440 /etc/sudoers.d/"$username"
+  $SUDO usermod -aG sudo "$username" || return 1
+  echo "$username ALL=(ALL) ALL" | $SUDO tee /etc/sudoers.d/"$username" >/dev/null || return 1
+  $SUDO chmod 440 /etc/sudoers.d/"$username" || return 1
 }
 install_docker() {
   echo "Installing Docker and Docker Compose..."
@@ -55,9 +55,17 @@ install_portainer() {
       portainer/portainer-ce:latest
   fi
 }
+install_docker_and_portainer() {
+  install_docker
+  install_portainer
+}
 configure_rclone() {
   echo "Ensuring rclone is installed..."
-  $SUDO apt-get install -y rclone
+  apt_install_best_effort rclone
+  if ! command -v rclone >/dev/null 2>&1; then
+    echo "rclone is required for Portainer Google Drive backups." >&2
+    return 1
+  fi
   local user_home
   user_home=$(eval echo "~$TARGET_USER")
   local rclone_conf="$user_home/.config/rclone/rclone.conf"
@@ -85,6 +93,10 @@ NOTE
 }
 create_backup_artifacts() {
   echo "Setting up Portainer backup scripts and systemd timer..."
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker is required for Portainer backup artifacts." >&2
+    return 1
+  fi
   $SUDO mkdir -p "$BACKUP_DIR"
   local default_host_label
   default_host_label=$(hostname -s 2>/dev/null || echo "starlight")
@@ -183,7 +195,11 @@ EOS
 
 configure_ufw_docker() {
   echo "Adding Docker-friendly UFW rules..."
-  $SUDO apt-get install -y ufw
+  apt_install_best_effort ufw
+  if ! have_command ufw; then
+    echo "ufw is not installed; skipping Docker firewall configuration." >&2
+    return 1
+  fi
 
   if ! $SUDO grep -q "BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
     cat <<'EOS' | $SUDO tee -a /etc/ufw/after.rules >/dev/null
@@ -244,7 +260,11 @@ run_docker_portainer_setup() {
     read -r -p "User '$TARGET_USER' does not exist. Create it now? (y/N): " create_user_choice
     if [[ "$create_user_choice" =~ ^[Yy]$ ]]; then
       prompt_sudo
-      ensure_user "$TARGET_USER"
+      run_step "Docker user setup" ensure_docker_user "$TARGET_USER"
+      if ! id -u "$TARGET_USER" >/dev/null 2>&1; then
+        warn_continue "User '$TARGET_USER' still does not exist after setup attempt; continuing as current user '$(whoami)'."
+        TARGET_USER="$(whoami)"
+      fi
     else
       echo "User '$TARGET_USER' not found; continuing as current user '$(whoami)'."
       TARGET_USER="$(whoami)"
@@ -265,20 +285,16 @@ run_docker_portainer_setup() {
   fi
 
   if [[ -z "$DO_DOCKER" || "$DO_DOCKER" =~ ^[Yy]$ ]]; then
-    install_docker
-    install_portainer
-    append_setup_log "Installed Docker Engine/Compose plugin and deployed Portainer."
+    run_step_strict "Docker and Portainer install" install_docker_and_portainer
   fi
 
   if [[ "$DO_UFW_DOCKER" =~ ^[Yy]$ ]]; then
-    configure_ufw_docker
-    append_setup_log "Configured Docker-friendly UFW rules and opened Portainer ports."
+    run_step_strict "Docker-friendly UFW configuration" configure_ufw_docker
   fi
 
   if [[ "$DO_BACKUP" =~ ^[Yy]$ ]]; then
-    configure_rclone
-    create_backup_artifacts
-    append_setup_log "Configured Portainer backup script and systemd timer."
+    run_step_strict "rclone configuration" configure_rclone
+    run_step_strict "Portainer backup timer setup" create_backup_artifacts
     append_setup_log "Backup directory: \`$BACKUP_DIR\`."
   fi
 

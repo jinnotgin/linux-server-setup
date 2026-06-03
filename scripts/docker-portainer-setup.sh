@@ -72,17 +72,19 @@ configure_rclone() {
 
   cat <<'NOTE'
 Configure rclone with Google Drive OAuth (no service account).
-- When prompted for "client_id", paste your Google OAuth Client ID (from Cloud Console -> Credentials).
-- Use the matching "client_secret" if you provided a client_id.
-- For "scope", "drive.file" is recommended (only files rclone creates).
-You will create a remote named "portainer_gdrive".
+- You will create a remote named "portainer_gdrive".
+- Choose "Google Drive" as the storage provider.
+- Use a desktop OAuth client ID and client secret from Google Cloud Console if you have one. Leaving both blank also works, but rclone's shared client is rate-limited.
+- For a personal Google Drive, do not use a service account.
+- For "scope", "drive.file" is recommended for backup-only use because it limits access to files rclone creates.
+- On a headless server, answer "n" to auto config, run the displayed "rclone authorize" command on a computer with a browser, then paste the returned token back here.
 NOTE
 
   read -r -p "Run interactive 'rclone config' now to create '${RCLONE_REMOTE}'? (y/N): " do_rclone_cfg
   if [[ "$do_rclone_cfg" =~ ^[Yy]$ ]]; then
     echo "Launching rclone config as $TARGET_USER (config: $rclone_conf)..."
-    $SUDO -u "$TARGET_USER" -H rclone config
-    if $SUDO -u "$TARGET_USER" -H rclone listremotes 2>/dev/null | grep -q "^${RCLONE_REMOTE}"; then
+    run_as_user "$TARGET_USER" rclone config
+    if run_as_user "$TARGET_USER" rclone listremotes 2>/dev/null | grep -q "^${RCLONE_REMOTE}"; then
       echo "rclone remote '${RCLONE_REMOTE}' detected."
     else
       echo "rclone remote '${RCLONE_REMOTE}' not found; run 'rclone config' later to add it." >&2
@@ -103,12 +105,16 @@ create_backup_artifacts() {
   read -r -p "Preferred host label for rclone backups (e.g. starlight): " BACKUP_HOST_LABEL
   BACKUP_HOST_LABEL=${BACKUP_HOST_LABEL:-$default_host_label}
   echo "Using '$BACKUP_HOST_LABEL' as the host label under portainer-backups/"
+  local user_home rclone_conf
+  user_home=$(eval echo "~$TARGET_USER")
+  rclone_conf="$user_home/.config/rclone/rclone.conf"
 
   cat <<EOS | $SUDO tee /usr/local/bin/portainer-gdrive-backup.sh >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
 BACKUP_DIR="/opt/portainer/backups"
 RCLONE_REMOTE="portainer_gdrive"
+RCLONE_CONFIG="$rclone_conf"
 HOST_LABEL="$BACKUP_HOST_LABEL"
 REMOTE_DIR="portainer-backups/\${HOST_LABEL}"
 KEEP_COUNT=10

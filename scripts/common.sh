@@ -18,6 +18,24 @@ else
   SUDO="sudo"
 fi
 
+run_as_user() {
+  local username="$1"
+  shift
+  local user_home
+  user_home=$(eval echo "~$username")
+
+  if [[ $(id -u) -eq 0 ]]; then
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u "$username" -- env HOME="$user_home" "$@"
+    else
+      su - "$username" -c "$(printf '%q ' "$@")"
+    fi
+    return
+  fi
+
+  sudo -u "$username" -H "$@"
+}
+
 ensure_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2

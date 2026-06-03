@@ -1,21 +1,25 @@
-# Linux Server Bootstrap (SSH hardening, Docker, Portainer, templates)
+# Linux Server Setup
 
-`setup.sh` is an interactive bootstrap script for Ubuntu/Debian-like hosts. It focuses on SSH/root hardening, Docker/Portainer installation, daily backups to Google Drive via `rclone`, and optional rendering of ready-made Docker Compose templates (Certbot renewal, Nginx reverse proxy, VLESS over WebSocket, VLESS Vision + VLESS XHTTP Reality, and Hysteria2). You can run only the parts you want (e.g., skip hardening/install and just render templates).
+This repository provides purpose-based interactive setup scripts for Ubuntu/Debian-like hosts:
+
+- `scripts/linux-server-setup.sh`: general server setup, SSH hardening, optional Tailscale, and UFW.
+- `scripts/docker-portainer-setup.sh`: Docker Engine, Docker Compose plugin, Portainer CE, and optional Portainer backups to Google Drive via `rclone`.
+- `scripts/tunnel-stack-setup.sh`: tunnel/proxy Docker stack rendering for Certbot, Nginx, VLESS, Hysteria2, WARP variants, and healthcheck.
+- `scripts/copyparty-setup.sh`: standalone Copyparty file-server stack rendering.
+
+`setup.sh` is a launcher that lets you run one purpose script or run all of them in order.
 
 ## Domain roles (Cloudflare vs direct)
 - Provide one or two domains. With one domain, pick a mode: **CDN** (Cloudflare OK) for VLESS over WebSocket only, or **Direct** (no CDN) for Hysteria2 + VLESS Vision + VLESS XHTTP Reality.
 - With two domains, assign one as the **CDN domain** (VLESS+WS only) and one as the **Direct domain** (Hysteria2 + Vision + XHTTP Reality). Certbot is configured for all selected domains.
 
 ## What the script does
-- Requests sudo at the start when privileged steps are selected.
-- (Optional) Updates packages and sets locale to `en_US.UTF-8` and timezone to `Asia/Singapore`.
-- (Optional) Hardens SSH: disables root login and password authentication, forces protocol 2, and restarts `sshd`.
-- Prompts for a username to create/ensure sudo access and docker group membership (password is requested when the user is created).
-- (Optional) Installs Docker Engine + Compose plugin and deploys Portainer (`portainer/portainer-ce`) on ports `8000` and `9443` using the `portainer_data` volume.
-- (Optional) Installs `rclone`, optionally configures a Google Drive remote using a service account JSON, and sets up a daily Portainer backup (local archive + optional Drive upload) with systemd service/timer.
-  - You can paste the service account JSON interactively; it is saved under the selected user’s home directory with correct ownership.
-- (Optional) Installs Tailscale, enables SSH + exit-node advertising, and optionally brings it up with your provided auth key.
-- Optionally renders Docker Compose templates with your inputs (domain/email/UUIDs/TLS paths) into the `generated/` folder, and can start the stacks right after rendering if Docker is present.
+- Requests sudo when privileged steps are selected.
+- General Linux setup can update packages, install common packages, set locale to `en_US.UTF-8`, set timezone to `Asia/Singapore`, create/ensure a sudo user, harden SSH, install Tailscale, and configure UFW.
+- Docker setup can install Docker Engine + Compose plugin, deploy Portainer CE (`portainer/portainer-ce`) on ports `8000` and `9443`, and configure daily Portainer backups.
+- Portainer backups use `rclone config` with Google Drive OAuth and a remote named `portainer_gdrive`.
+- Tunnel stack setup renders Docker Compose templates with your inputs under `~/tunnel-stack` and can start the stacks after rendering if Docker is present.
+- Copyparty setup renders its Docker Compose files under `~/copyparty-stack`.
 
 ## Usage
 ```bash
@@ -24,11 +28,26 @@ cd linux-server-setup
 chmod +x setup.sh
 ./setup.sh
 ```
-Run as root or a sudo-capable user. The script will prompt for:
-- Which sections to run (system prep, hardening, Docker/Portainer, backups, template rendering).
+
+You can also run a purpose script directly:
+
+```bash
+chmod +x scripts/*.sh
+./scripts/linux-server-setup.sh
+./scripts/docker-portainer-setup.sh
+./scripts/tunnel-stack-setup.sh
+./scripts/copyparty-setup.sh
+```
+
+For fresh servers, run the scripts in that order. `setup.sh` also has a "Run all in order" option.
+
+If you download only the launcher with `wget` or `curl`, also download the `scripts/` directory and `docker-templates/` directory. The launcher depends on those files.
+
+Run as root or a sudo-capable user. The scripts will prompt for:
+- Which purpose setup to run.
 - Sudo password (if needed).
 - The username to create/ensure, and a password if the user is being created.
-- Optional Google Drive service account JSON path for automated `rclone` configuration.
+- Optional interactive `rclone config` for the Google Drive remote used by Portainer backups.
 - Domain names, email, UUIDs, and other template parameters if you choose to render templates.
 
 > Re-login after the script finishes so the chosen user picks up new group memberships (sudo/docker).
@@ -37,15 +56,15 @@ Run as root or a sudo-capable user. The script will prompt for:
 See [`docs/portainer-backup.md`](docs/portainer-backup.md) for details on how the daily backup works and how to restore from the archives.
 
 ## Template overview (`docker-templates/`)
-- The script renders stacks under `~/server-stacks` with user ownership:
-  - **ssl**: `nbraun1/certbot` with cron renewal; certs/logs live in `~/server-stacks/ssl` (mounted as `/etc/letsencrypt`), binds port 80.
-  - **cdn-proxy (Nginx)**: reverse proxy for the CDN domain using certs from `~/server-stacks/ssl` (mounted as `/certs`), proxies `/ws` to VLESS WS over `proxy_net`; listens on public port `6443`.
+- The tunnel script renders stacks under `~/tunnel-stack` with user ownership:
+  - **ssl**: `nbraun1/certbot` with cron renewal; certs/logs live in `~/tunnel-stack/ssl` (mounted as `/etc/letsencrypt`), binds port 80.
+  - **cdn-proxy (Nginx)**: reverse proxy for the CDN domain using certs from `~/tunnel-stack/ssl` (mounted as `/certs`), proxies `/ws` to VLESS WS over `proxy_net`; listens on public port `6443`.
   - **vless-cdn**: `ghcr.io/xtls/xray-core:latest` serving VLESS over WebSocket (TLS offloaded at `cdn-proxy`); multiple UUID clients supported.
   - **gateway**: Nginx stream router on public port `2053` SNI-routing to CDN (vless-cdn), Direct Vision, and XHTTP Reality; serves the Vision fallback site on 20002.
   - **vless-direct**: `ghcr.io/xtls/xray-core:latest` with VLESS Vision (XTLS) + VLESS XHTTP Reality, using the Direct domain cert from `/certs`.
   - **hysteria2**: single-password Hysteria2 using the Direct domain cert; masquerade target configurable.
   - **healthcheck**: tiny curl container that pings a user URL every 5 minutes (healthchecks.io-friendly).
-  - **copyparty**: file server with configurable credentials and data path; config in `~/server-stacks/copyparty/cfg`, default port 3923.
+- The Copyparty script renders a separate file-server stack under `~/copyparty-stack`; default port 3923.
 
 After rendering, you can let the script start the generated stacks automatically (if Docker is installed), or start them yourself with `docker compose up -d` from each generated directory.
 
@@ -55,9 +74,9 @@ After rendering, you can let the script start the generated stacks automatically
 - The Certbot stack binds port 80; ensure it is free when you run it. The gateway binds public port `2053`, the CDN proxy binds public port `6443`, Hysteria2 WARP binds public port `8443` TCP/UDP, and Hysteria2 binds public port `8444` TCP/UDP.
 - Keep the CDN domain behind Cloudflare only for VLESS+WS. The Direct domain must not sit behind a CDN for Vision/XHTTP Reality/Hysteria2 to work.
 - Before starting the Nginx or VLESS stacks, create the shared Docker network with `docker network create proxy_net` (the script will also create it automatically if Docker is available when you choose to auto-start stacks).
-- Hysteria2 uses a generated password; update it in `~/server-stacks/hysteria2/server.yaml` if you want a custom value.
-- Templates and SSL material are rendered under the selected user's home directory (`~/server-stacks` with `~/server-stacks/ssl` for certs) with user ownership. Compose files use absolute paths into that folder.
-- A summary of client-facing details is written to `~/server-stacks/summary.txt` after rendering.
+- Hysteria2 uses a generated password; update it in `~/tunnel-stack/hysteria2/hysteria.yaml` if you want a custom value.
+- Tunnel templates and SSL material are rendered under the selected user's home directory (`~/tunnel-stack` with `~/tunnel-stack/ssl` for certs) with user ownership. Compose files use absolute paths into that folder.
+- A summary of client-facing tunnel details is written to `~/tunnel-stack/summary.txt` after rendering.
 
 ## Nginx content seeding
-When rendering templates, the script can optionally download a static 2048 game (from `jinnotgin/2048`) into `~/server-stacks/nginx/www` (CDN site) and `~/server-stacks/gateway/www` (Vision fallback site). If you skip the download, a simple placeholder page is written to the respective `www` directories; replace it with your own site files at any time.
+When rendering tunnel templates, the script can optionally download a static 2048 game (from `jinnotgin/2048`) into `~/tunnel-stack/nginx/www` (CDN site) and `~/tunnel-stack/gateway/www` (Vision fallback site). If you skip the download, a simple placeholder page is written to the respective `www` directories; replace it with your own site files at any time.

@@ -128,15 +128,45 @@ configure_tailscale_udp_offloads() {
     return 0
   fi
 
+  $SUDO tee /usr/local/sbin/tailscale-udp-offload >/dev/null <<'EOF' || return 1
+#!/bin/sh
+set -eu
+
+NETDEV=$(ip -o route get 8.8.8.8 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+if [ -z "$NETDEV" ]; then
+  echo "Could not determine default network interface." >&2
+  exit 1
+fi
+
+ethtool -K "$NETDEV" rx-udp-gro-forwarding on rx-gro-list off
+EOF
+  $SUDO chmod 755 /usr/local/sbin/tailscale-udp-offload || return 1
+
   if systemctl is-enabled networkd-dispatcher >/dev/null 2>&1; then
     $SUDO mkdir -p /etc/networkd-dispatcher/routable.d || return 1
-    printf '#!/bin/sh\n\nethtool -K %s rx-udp-gro-forwarding on rx-gro-list off\n' "$netdev" | \
+    printf '#!/bin/sh\n\n/usr/local/sbin/tailscale-udp-offload\n' | \
       $SUDO tee /etc/networkd-dispatcher/routable.d/50-tailscale >/dev/null || return 1
     $SUDO chmod 755 /etc/networkd-dispatcher/routable.d/50-tailscale || return 1
     $SUDO /etc/networkd-dispatcher/routable.d/50-tailscale || return 1
     append_setup_log "Installed persistent Tailscale UDP offload script for \`$netdev\`."
   else
-    warn_continue "networkd-dispatcher is not enabled; Tailscale UDP offload tuning was applied now but may not persist after reboot."
+    $SUDO tee /etc/systemd/system/tailscale-udp-offload.service >/dev/null <<'EOF' || return 1
+[Unit]
+Description=Apply Tailscale UDP forwarding offload settings
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tailscale-udp-offload
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    $SUDO systemctl daemon-reload || return 1
+    $SUDO systemctl enable tailscale-udp-offload.service || return 1
+    $SUDO systemctl start tailscale-udp-offload.service || return 1
+    append_setup_log "Installed persistent Tailscale UDP offload systemd service."
   fi
 }
 configure_tailscale_firewalld() {
@@ -147,7 +177,7 @@ configure_tailscale_firewalld() {
   fi
 }
 install_tailscale() {
-  echo "Installing Tailscale and enabling SSH + exit-node advertising..."
+  echo "Installing Tailscale and enabling exit-node advertising..."
   if ! command -v curl >/dev/null 2>&1; then
     $SUDO apt-get update -y
     apt_install_best_effort curl
@@ -164,9 +194,13 @@ install_tailscale() {
   configure_tailscale_udp_offloads || return 1
   configure_tailscale_firewalld || return 1
 
+  read -r -p "Enable Tailscale SSH? (y/N): " tailscale_ssh
   read -r -p "Subnet routes to advertise (comma-separated CIDRs, leave blank for none): " tailscale_routes
 
-  local tailscale_args=(--ssh --advertise-exit-node)
+  local tailscale_args=(--advertise-exit-node)
+  if [[ "$tailscale_ssh" =~ ^[Yy]$ ]]; then
+    tailscale_args+=(--ssh)
+  fi
   if [[ -n "$tailscale_routes" ]]; then
     tailscale_args+=(--advertise-routes="$tailscale_routes")
   fi
@@ -177,10 +211,16 @@ install_tailscale() {
   if [[ -n "$tailscale_key" ]]; then
     $SUDO tailscale up --auth-key="$tailscale_key" "${tailscale_args[@]}" || return 1
   else
+    local tailscale_followup_args="--advertise-exit-node"
+    if [[ "$tailscale_ssh" =~ ^[Yy]$ ]]; then
+      tailscale_followup_args="$tailscale_followup_args --ssh"
+    fi
     if [[ -n "$tailscale_routes" ]]; then
-      echo "Skipped 'tailscale up'; run 'sudo tailscale up --auth-key=... --ssh --advertise-exit-node --advertise-routes=$tailscale_routes' later."
-    else
-      echo "Skipped 'tailscale up'; run 'sudo tailscale up --auth-key=... --ssh --advertise-exit-node' later."
+      tailscale_followup_args="$tailscale_followup_args --advertise-routes=$tailscale_routes"
+    fi
+    echo "Skipped 'tailscale up'; run 'sudo tailscale up --auth-key=... $tailscale_followup_args' later."
+    if [[ ! "$tailscale_ssh" =~ ^[Yy]$ ]]; then
+      echo "Tailscale SSH was not enabled; add '--ssh' to that command later if you want it."
     fi
   fi
 }

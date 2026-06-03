@@ -18,7 +18,7 @@ This repository provides purpose-based interactive setup scripts for Ubuntu/Debi
 ## What the script does
 - Requests sudo when privileged steps are selected.
 - Best-effort optional steps warn and continue where safe; warnings are written to the setup log. Required inputs and template rendering errors still stop the selected setup because continuing would create incomplete files.
-- General Linux setup can update packages, install common packages, set locale to `en_US.UTF-8`, set timezone to `Asia/Singapore`, create/ensure a sudo user, harden SSH, install Tailscale with SSH and exit-node advertising, optionally advertise subnet routes, configure Linux IP forwarding and UDP offload tuning for Tailscale routing, configure UFW, and install a host-level healthchecks.io uptime ping.
+- General Linux setup can update packages, install common packages, set locale to `en_US.UTF-8`, set timezone to `Asia/Singapore`, create/ensure a sudo user, harden SSH, install Tailscale with exit-node advertising, optionally enable Tailscale SSH, optionally advertise subnet routes, configure Linux IP forwarding and persistent UDP offload tuning for Tailscale routing, configure UFW, and install a host-level healthchecks.io uptime ping.
 - Docker setup can install Docker Engine + Compose plugin, deploy Portainer CE (`portainer/portainer-ce`) on ports `8000` and `9443`, optionally add Docker-friendly UFW rules (`DOCKER-USER` chain in `after.rules`) and open Portainer ports, and configure daily Portainer backups.
 - Portainer backups use `rclone config` with Google Drive OAuth and a remote named `portainer_gdrive`.
 - Tunnel stack setup renders one Portainer-ready Docker Compose file with your inputs under `~/tunnel-stack/docker-compose.yml`, and optionally opens tunnel ports in UFW (using `ufw route allow` only if Docker-friendly rules are already active). It does not launch Docker Compose for you.
@@ -63,6 +63,7 @@ Run as root or a sudo-capable user. The scripts will prompt for:
 - One option or comma-separated options when using `setup.sh`.
 - Sudo password (if needed).
 - The username to create/ensure, and a password if the user is being created.
+- Whether to enable Tailscale SSH.
 - Optional Tailscale subnet routes to advertise, as comma-separated CIDRs.
 - Optional interactive `rclone config` for the Google Drive remote used by Portainer backups.
 - Domain names, email, UUIDs, and other template parameters if you choose to render templates.

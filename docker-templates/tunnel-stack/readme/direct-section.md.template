@@ -1,0 +1,88 @@
+## Direct Stack
+
+Direct connection with no CDN in the path — lower latency and higher throughput
+when the server IP is reachable. Three protocols are available; they operate
+independently and clients can use any combination.
+
+---
+
+### Hysteria2
+
+UDP-based protocol that disguises traffic as QUIC/HTTP3. Connects **directly**
+to the server — no gateway involved. Good first choice for clients that support it.
+
+{{HYSTERIA_STD_HEADING}}| Field | Value |
+|-------|-------|
+| Domain | `{{DIRECT_DOMAIN}}` |
+| Port | `8444 UDP/TCP` |
+| Password | `{{HYSTERIA_PASSWORD}}` |
+| Masquerade site | `{{MASQ}}` |
+
+{{HYSTERIA_WARP_SECTION}}---
+
+### VLESS Vision + XHTTP Reality (via gateway)
+
+These two protocols share a `gateway-router` container (Nginx) that listens on
+port 2053 and dispatches incoming connections to the Xray backend by SNI. Vision
+and Reality both terminate at the same Xray process; the gateway is purely a
+routing layer in front of them.
+
+#### Gateway router
+
+| Field | Value |
+|-------|-------|
+| Listen port | `2053 TCP` |
+| SNI routing | `{{DIRECT_DOMAIN}}` → `vless-direct` |
+| Fallback site | `{{STACK_DIR}}/gateway/www/` |
+
+---
+
+#### VLESS Vision (XTLS)
+
+High-performance TLS flow. Clients connect to the gateway on port 2053 with
+SNI = direct domain. Vision uses the `xtls-rprx-vision` flow to strip the inner
+TLS layer for maximum throughput.
+
+{{VISION_STD_HEADING}}| Field | Value |
+|-------|-------|
+| Domain / SNI | `{{DIRECT_DOMAIN}}` |
+| Port | `2053` (via gateway) |
+| Protocol | VLESS |
+| Flow | `xtls-rprx-vision` |
+| UUIDs | `{{VISION_IDS}}` |
+
+{{VISION_WARP_SECTION}}---
+
+#### VLESS XHTTP Reality
+
+TLS without a certificate — the handshake borrows the identity of a legitimate
+site (the Reality target). Resistant to TLS fingerprinting because the server
+presents a real certificate for the impersonated domain.
+
+{{REALITY_STD_HEADING}}| Field | Value |
+|-------|-------|
+| Port | `2053` (via gateway) |
+| Network | XHTTP |
+| Path | `{{XHTTP_PATH}}` |
+| Reality target | `{{REALITY_TARGET}}` |
+| SNI / server names | `{{REALITY_SNI_INPUT}}` |
+| Public key | `{{REALITY_PUB_KEY}}` |
+| Short IDs | `{{REALITY_SHORT_IDS_CSV}}` |
+| Protocol | VLESS |
+| Flow | `xtls-rprx-vision` |
+| UUIDs | `{{REALITY_IDS}}` |
+
+{{REALITY_WARP_SECTION}}> The Reality **private key** is stored in `{{STACK_DIR}}/reality-keys.txt`.
+> Never share it — the public key above is what clients need.
+
+---
+
+#### TLS (inside container paths)
+
+| | Path |
+|--|------|
+| Certificate | `{{TLS_CERT_DIRECT}}` |
+| Private key | `{{TLS_KEY_DIRECT}}` |
+
+---
+

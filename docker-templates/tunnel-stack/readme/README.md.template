@@ -1,0 +1,62 @@
+# Tunnel Stack — Client Configuration
+
+> **Generated:** {{GENERATED_AT}}
+> **Stack dir:** `{{STACK_DIR}}`
+
+This file is the authoritative reference for your tunnel stack's credentials and
+connection parameters. **Keep it private** — it contains secrets.
+
+---
+
+## Overview
+
+This stack runs encrypted proxy tunnels as Docker services, managed by a single
+Compose file (Portainer-ready). Two independent egress paths are available:
+
+| Path | Protocols | Best for |
+|------|-----------|----------|
+| **CDN** | VLESS + WebSocket over TLS | Networks that block direct server IPs; hides behind Cloudflare's edge |
+| **Direct** | Hysteria2, VLESS Vision, VLESS XHTTP Reality | Performance-sensitive use; no CDN hop |
+
+TLS certificates for all domains are issued automatically by the bundled
+`certbot` container using Cloudflare DNS-01 validation (no open inbound port 80
+required). Outbound traffic can optionally be routed through a Cloudflare WARP
+container for an additional layer of indirection.
+
+---
+
+{{CDN_SECTION}}{{DIRECT_SECTION}}{{HEALTHCHECK_SECTION}}{{WARP_SECTION}}## TLS Certificates
+
+The `certbot` service handles issuance and renewal for all configured domains.
+It uses Cloudflare DNS-01 so the server never needs to expose port 80.
+
+| Field | Value |
+|-------|-------|
+| Domains | `{{DOMAINS_CSV}}` |
+| Host SSL dir | `{{SSL_DIR}}` |
+| Contact email | `{{CERT_EMAIL}}` |
+| Cloudflare API token | `{{CLOUDFLARE_API_TOKEN}}` |
+
+Certificates are stored under `{{SSL_DIR}}/live/<domain>/` and mounted
+read-only into proxy containers.
+
+---
+
+## Files & Directories
+
+| Path | Purpose |
+|------|---------|
+| `{{STACK_DIR}}/docker-compose.yml` | Portainer-ready Compose stack |
+| `{{STACK_DIR}}/ssl/` | TLS certificates (Certbot output) |
+{{FILES_ROWS}}
+---
+
+## Quick Start
+
+```bash
+# Create the shared proxy network (once per host)
+docker network create proxy_net
+
+# Bring up the stack
+docker compose -f {{STACK_DIR}}/docker-compose.yml up -d
+```

@@ -223,7 +223,12 @@ render_templates() {
   read -r -p "Cloudflare API token for DNS-01 certificate issuance (leave blank to write placeholder): " CLOUDFLARE_API_TOKEN
   CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-"<token here>"}
 
-  local summary="Client setup summary\nGenerated at $(date -Iseconds)\n"
+  local generated_at
+  generated_at=$(date -Iseconds)
+  local cdn_section="" direct_section="" healthcheck_section="" warp_section=""
+  local files_rows=""
+  local README_TEMPLATE_DIR="$TEMPLATE_DIR/tunnel-stack/readme"
+
 
   local render_cdn="n" render_direct="n"
   if [[ -n "${CDN_DOMAIN:-}" ]]; then
@@ -311,14 +316,36 @@ render_templates() {
       VLESS_CDN_CONFIG_PATH "$vless_cdn_dir/config.json")
     compose_services+=$'\n\n'
 
-    summary+=$'\n'"CDN VLESS over WebSocket (via $CDN_DOMAIN)"$'\n'
-    summary+="  External: https://$CDN_DOMAIN:6443/ws (Cloudflare OK)"$'\n'
+    local cdn_warp_section="" cdn_std_heading=""
     if [[ "$render_warp_variants" =~ ^[Yy]$ ]]; then
-      summary+="  Warp egress path: https://$CDN_DOMAIN:6443/ws-offset"$'\n'
+      cdn_std_heading=$'### Standard\n\n'
+      cdn_warp_section="### With WARP egress
+
+Same UUIDs and port. Outbound traffic from the server routes through Cloudflare
+WARP before reaching the internet — only the WebSocket path differs.
+
+| Field | Value |
+|-------|-------|
+| Domain | \`$CDN_DOMAIN\` |
+| Port | \`$nginx_port\` |
+| Network | WebSocket (\`ws\`) |
+| Path | \`/ws-offset\` |
+| TLS | enabled |
+| Protocol | VLESS |
+| UUIDs | \`$VLESS_WS_IDS\` |
+
+"
     fi
-    summary+="  CDN proxy TLS port: $nginx_port"$'\n'
-    summary+="  UUIDs: $VLESS_WS_IDS"$'\n'
-    summary+="  TLS cert/key: $tls_cert_cdn | $tls_key_cdn"$'\n'
+    cdn_section=$(render_template "$README_TEMPLATE_DIR/cdn-section.md.template" \
+      CDN_DOMAIN "$CDN_DOMAIN" \
+      NGINX_HTTPS_PORT "$nginx_port" \
+      VLESS_WS_IDS "$VLESS_WS_IDS" \
+      CDN_STD_HEADING "$cdn_std_heading" \
+      CDN_WARP_SECTION "$cdn_warp_section" \
+      TLS_CERT_CDN "$tls_cert_cdn" \
+      TLS_KEY_CDN "$tls_key_cdn")
+    files_rows+="| \`nginx/nginx.conf\` | Nginx reverse-proxy config for CDN stack |"$'\n'
+    files_rows+="| \`vless-cdn/config.json\` | Xray config for VLESS-over-WebSocket |"$'\n'
   fi
 
   # Direct stack: Hysteria2 + Vision + XHTTP Reality (no CDN)
@@ -454,24 +481,92 @@ render_templates() {
     fi
     compose_services+=$'\n\n'
 
-    summary+=$'\n'"Direct stack (no CDN) via $DIRECT_DOMAIN"$'\n'
-    summary+="  Gateway router on 2053 TCP"$'\n'
-    summary+="  VLESS Vision (XTLS) via gateway SNI=$DIRECT_DOMAIN, UUIDs: $VISION_IDS"$'\n'
-    summary+="  VLESS XHTTP Reality via gateway path=$XHTTP_PATH target=$REALITY_TARGET"$'\n'
-    summary+="    SNI: $REALITY_SNI_INPUT"$'\n'
+    local reality_pub_display
     if [[ "$reality_pub" == "REPLACE_WITH_PUBLIC_KEY" ]]; then
-      summary+="    Public key (Xray prints this as 'Password'): NOT GENERATED (install docker and run 'docker run --rm ghcr.io/xtls/xray-core:latest x25519')"$'\n'
+      reality_pub_display="**NOT GENERATED** — install Docker and run: \`docker run --rm ghcr.io/xtls/xray-core:latest x25519\`"
     else
-      summary+="    Public key (Xray prints this as 'Password'): $reality_pub"$'\n'
+      reality_pub_display="\`$reality_pub\`"
     fi
-    summary+="    Short IDs: $(IFS=', '; echo "${REALITY_SHORT_LIST[*]}")"$'\n'
-    summary+="    UUIDs: $REALITY_IDS"$'\n'
-    summary+="  Hysteria2 on 8444 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
+    local hysteria_warp_section="" vision_warp_section="" reality_warp_section=""
+    local hysteria_std_heading="" vision_std_heading="" reality_std_heading=""
     if [[ "$enable_warp_variants" == "1" ]]; then
-      summary+="  Hysteria2 WARP egress on 8443 TCP/UDP, password: $HYSTERIA_PASSWORD"$'\n'
-      summary+="  Warp variants: VLESS Vision on 20011, Reality on 30011 (egress via WARP), same UUIDs"$'\n'
+      hysteria_std_heading=$'#### Standard\n\n'
+      vision_std_heading=$'##### Standard\n\n'
+      reality_std_heading=$'##### Standard\n\n'
+      hysteria_warp_section="#### With WARP egress
+
+Outbound traffic from the server routes through Cloudflare WARP before reaching
+the internet — otherwise identical to the standard variant above.
+
+| Field | Value |
+|-------|-------|
+| Domain | \`$DIRECT_DOMAIN\` |
+| Port | \`8443 UDP/TCP\` |
+| Password | \`$HYSTERIA_PASSWORD\` |
+| Masquerade site | \`$MASQ\` |
+
+"
+      vision_warp_section="##### With WARP egress
+
+Outbound traffic from the server routes through Cloudflare WARP. Same UUIDs and
+connection parameters — only the port differs.
+
+| Field | Value |
+|-------|-------|
+| Domain / SNI | \`$DIRECT_DOMAIN\` |
+| Port | \`20011\` (direct, bypasses gateway) |
+| Protocol | VLESS |
+| Flow | \`xtls-rprx-vision\` |
+| UUIDs | \`$VISION_IDS\` |
+
+"
+      reality_warp_section="##### With WARP egress
+
+Outbound traffic from the server routes through Cloudflare WARP. Same UUIDs,
+keys, and short IDs — only the port differs.
+
+| Field | Value |
+|-------|-------|
+| Port | \`30011\` (direct, bypasses gateway) |
+| Network | XHTTP |
+| Path | \`$XHTTP_PATH\` |
+| Reality target | \`$REALITY_TARGET\` |
+| SNI / server names | \`$REALITY_SNI_INPUT\` |
+| Public key | \`$reality_pub_display\` |
+| Short IDs | \`$(IFS=', '; echo "${REALITY_SHORT_LIST[*]}")\` |
+| Protocol | VLESS |
+| Flow | \`xtls-rprx-vision\` |
+| UUIDs | \`$REALITY_IDS\` |
+
+"
     fi
-    summary+="  TLS cert/key: $tls_cert_direct | $tls_key_direct"$'\n'
+    direct_section=$(render_template "$README_TEMPLATE_DIR/direct-section.md.template" \
+      DIRECT_DOMAIN "$DIRECT_DOMAIN" \
+      STACK_DIR "$STACK_DIR" \
+      HYSTERIA_PASSWORD "$HYSTERIA_PASSWORD" \
+      MASQ "$MASQ" \
+      HYSTERIA_STD_HEADING "$hysteria_std_heading" \
+      HYSTERIA_WARP_SECTION "$hysteria_warp_section" \
+      VISION_IDS "$VISION_IDS" \
+      VISION_STD_HEADING "$vision_std_heading" \
+      VISION_WARP_SECTION "$vision_warp_section" \
+      XHTTP_PATH "$XHTTP_PATH" \
+      REALITY_TARGET "$REALITY_TARGET" \
+      REALITY_SNI_INPUT "$REALITY_SNI_INPUT" \
+      REALITY_PUB_KEY "$reality_pub_display" \
+      REALITY_SHORT_IDS_CSV "$(IFS=', '; echo "${REALITY_SHORT_LIST[*]}")" \
+      REALITY_IDS "$REALITY_IDS" \
+      REALITY_STD_HEADING "$reality_std_heading" \
+      REALITY_WARP_SECTION "$reality_warp_section" \
+      TLS_CERT_DIRECT "$tls_cert_direct" \
+      TLS_KEY_DIRECT "$tls_key_direct")
+    files_rows+="| \`gateway/nginx.conf\` | Nginx SNI-routing gateway config |"$'\n'
+    files_rows+="| \`vless-direct/config.json\` | Xray config for Vision + XHTTP Reality |"$'\n'
+    files_rows+="| \`hysteria2/hysteria.yaml\` | Hysteria2 server config |"$'\n'
+    files_rows+="| \`reality-keys.txt\` | Reality keypair (private + public) — keep secret |"$'\n'
+    if [[ "$enable_warp_variants" == "1" ]]; then
+      files_rows+="| \`hysteria2/hysteria-warp.yaml\` | Hysteria2 config with WARP egress |"$'\n'
+    fi
   fi
 
   # Healthcheck pinger (curl every 5 minutes)
@@ -485,7 +580,8 @@ render_templates() {
       compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/healthcheck.yml.template" \
         HEALTHCHECK_URL "$HEALTHCHECK_URL")
       compose_services+=$'\n\n'
-      summary+=$'\n'"Healthcheck: curl $HEALTHCHECK_URL every 5 minutes"$'\n'
+      healthcheck_section=$(render_template "$README_TEMPLATE_DIR/healthcheck-section.md.template" \
+        HEALTHCHECK_URL "$HEALTHCHECK_URL")
     fi
   fi
 
@@ -496,8 +592,9 @@ render_templates() {
     compose_services+=$(render_template "$SERVICE_TEMPLATE_DIR/warp.yml.template" \
       WARP_DATA_PATH "$warp_dir/data")
     compose_services+=$'\n\n'
-    summary+=$'\n'"WARP proxy internal on warp:1080 (SOCKS5/HTTP with UDP relay)"$'\n'
-    summary+="  Data dir: $warp_dir/data"$'\n'
+    warp_section=$(render_template "$README_TEMPLATE_DIR/warp-section.md.template" \
+      WARP_DATA_DIR "$warp_dir/data")
+    files_rows+="| \`warp/data/\` | Cloudflare WARP persistent data |"$'\n'
   fi
 
   render_template_file "$COMPOSE_TEMPLATE_DIR/docker-compose.yml.template" \
@@ -505,11 +602,21 @@ render_templates() {
     SERVICE_BLOCKS "${compose_services%$'\n'}"
   COMPOSE_OUTPUTS=("$final_compose")
 
-  if [[ -n "$summary" ]]; then
-    local summary_file="$STACK_DIR/summary.txt"
-    printf "%s\n" "$summary" > "$summary_file"
-    echo "Wrote client summary to $summary_file"
-  fi
+  local readme_file="$STACK_DIR/README.md"
+  render_template_file "$README_TEMPLATE_DIR/README.md.template" \
+    "$readme_file" \
+    GENERATED_AT "$generated_at" \
+    STACK_DIR "$STACK_DIR" \
+    CDN_SECTION "$cdn_section" \
+    DIRECT_SECTION "$direct_section" \
+    HEALTHCHECK_SECTION "$healthcheck_section" \
+    WARP_SECTION "$warp_section" \
+    SSL_DIR "$SSL_DIR" \
+    DOMAINS_CSV "$DOMAINS_CSV" \
+    CERT_EMAIL "$CERT_EMAIL" \
+    CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN" \
+    FILES_ROWS "$files_rows"
+  echo "Wrote client README to $readme_file"
 
   if [[ -d "$STACK_DIR" ]]; then
     ${SUDO:-} chown -R "$TARGET_USER:$TARGET_USER" "$STACK_DIR"

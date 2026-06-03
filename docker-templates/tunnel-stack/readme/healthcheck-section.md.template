@@ -1,0 +1,13 @@
+## Healthcheck Pinger
+
+A minimal container that `curl`s a URL every 5 minutes to signal uptime to an
+external monitor (e.g. UptimeRobot, Healthchecks.io). Useful for getting alerted
+when the stack goes down without having to poll the server yourself.
+
+| Field | Value |
+|-------|-------|
+| Ping URL | `{{HEALTHCHECK_URL}}` |
+| Interval | every 5 minutes |
+
+---
+

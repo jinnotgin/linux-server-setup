@@ -1,0 +1,27 @@
+## Cloudflare WARP Proxy
+
+Cloudflare WARP is a VPN-like service from Cloudflare. This stack runs it as a
+container that exposes an internal SOCKS5/HTTP proxy. When a proxy protocol has a
+"WARP egress" variant, it means the server routes that protocol's **outbound**
+connections through the WARP container before they reach the internet — the
+destination sees a Cloudflare IP instead of your server's IP.
+
+Use cases:
+- Your server's IP is blocked or flagged at certain destinations
+- Extra layer of indirection beyond the tunnel itself
+- Outbound traffic blends in with Cloudflare's network
+
+The WARP container is shared by all stacks. It is **not** in the path between the
+client and the server — only in the path between the server and the internet.
+
+| Field | Value |
+|-------|-------|
+| Internal address | `warp:1080` |
+| Protocols | SOCKS5 and HTTP proxy |
+| WARP data dir | `{{WARP_DATA_DIR}}` |
+
+> **First-start:** WARP must register with Cloudflare before traffic flows.
+> Run `docker compose logs -f warp` and wait for a successful registration message.
+
+---
+

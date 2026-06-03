@@ -1,0 +1,30 @@
+## CDN Stack — VLESS over WebSocket
+
+Traffic is disguised as normal HTTPS and routed through Cloudflare's CDN. This
+lets the proxy survive on networks that block direct server IPs, because
+Cloudflare's edge addresses are broadly trusted and expensive to block wholesale.
+
+The `cdn-proxy` Nginx container terminates TLS on port {{NGINX_HTTPS_PORT}} and
+forwards WebSocket upgrade requests to the `vless-cdn` Xray backend. Cloudflare
+should be configured in **proxy mode** (orange cloud) for this domain so traffic
+flows through Cloudflare's edge, not directly to the server.
+
+{{CDN_STD_HEADING}}| Field | Value |
+|-------|-------|
+| Domain | `{{CDN_DOMAIN}}` |
+| Port | `{{NGINX_HTTPS_PORT}}` |
+| Network | WebSocket (`ws`) |
+| Path | `/ws` |
+| TLS | enabled |
+| Protocol | VLESS |
+| UUIDs | `{{VLESS_WS_IDS}}` |
+
+{{CDN_WARP_SECTION}}### TLS (inside container paths)
+
+| | Path |
+|--|------|
+| Certificate | `{{TLS_CERT_CDN}}` |
+| Private key | `{{TLS_KEY_CDN}}` |
+
+---
+

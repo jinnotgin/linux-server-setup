@@ -200,6 +200,7 @@ EOS
 }
 
 configure_ufw_docker() {
+  # UFW-docker: https://github.com/chaifeng/ufw-docker
   echo "Adding Docker-friendly UFW rules..."
   apt_install_best_effort ufw
   if ! have_command ufw; then
@@ -238,22 +239,23 @@ COMMIT
 EOS
   fi
 
-  # Now that the DOCKER-USER chain is in place, add route rules for base ports
-  local ssh_ports=("22")
-  if [[ -n "${SSH_PORT_SELECTED:-}" && "$SSH_PORT_SELECTED" != "22" ]]; then
-    ssh_ports+=("$SSH_PORT_SELECTED")
+  if command -v tailscale >/dev/null 2>&1; then
+    if ip link show tailscale0 >/dev/null 2>&1; then
+      echo "Tailscale detected; allowing Tailscale access to Docker-published services..."
+      $SUDO ufw route allow in on tailscale0 from any to any
+    else
+      echo "Tailscale installed but tailscale0 interface not yet active."
+      echo "After 'tailscale up', run: sudo ufw route allow in on tailscale0 from any to any && sudo ufw reload"
+    fi
   fi
-  for p in "${ssh_ports[@]}"; do
-    $SUDO ufw route allow proto tcp from any to any port "$p"
-  done
+
+  # With UFW-docker friendly rules, if you want to allow public networks to access the services provided 
+  # by the Docker container (for example, the service port of a container is 80), run the following 
+  # command to allow the public networks to access this service:
+  # > ufw route allow proto tcp from any to any port 80
+  # This allows the public network to access all published ports whose container port is 80.
   $SUDO ufw route allow proto tcp from any to any port 80
   $SUDO ufw route allow proto tcp from any to any port 443
-
-  # Portainer management ports
-  $SUDO ufw allow 8000/tcp
-  $SUDO ufw allow 9443/tcp
-  $SUDO ufw route allow proto tcp from any to any port 8000
-  $SUDO ufw route allow proto tcp from any to any port 9443
 
   $SUDO ufw reload
 }
@@ -278,7 +280,7 @@ run_docker_portainer_setup() {
   fi
 
   read -r -p "Install Docker Engine, Docker Compose plugin, and Portainer CE? (Y/n): " DO_DOCKER
-  read -r -p "Add Docker-friendly UFW rules and open Portainer ports (8000, 9443)? (y/N): " DO_UFW_DOCKER
+  read -r -p "Add Docker-friendly UFW rules and allow Tailscale access to Docker-published services? (y/N): " DO_UFW_DOCKER
   read -r -p "Configure Portainer backups to Google Drive with rclone? (y/N): " DO_BACKUP
   init_setup_log "docker-portainer" "$TARGET_USER"
   append_setup_log "Target user: \`$TARGET_USER\`."

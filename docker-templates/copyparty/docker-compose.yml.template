@@ -4,7 +4,7 @@ services:
     image: copyparty/ac:latest
     container_name: copyparty
     restart: unless-stopped
-    user: "1000:1000"
+    user: "{{COPYPARTY_UID}}:{{COPYPARTY_GID}}"
     ports:
       - "3923:3923"
     volumes:

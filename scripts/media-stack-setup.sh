@@ -222,6 +222,8 @@ run_media_stack_setup() {
 
   if [[ -d "$STACK_DIR" ]]; then
     ${SUDO:-} chown -R "$TARGET_USER:$TARGET_USER" "$STACK_DIR"
+    ${SUDO:-} chown -R root:root "$HOST_SSL_DIR"
+    ${SUDO:-} chmod 0755 "$HOST_SSL_DIR"
   fi
 
   echo "Media stack files rendered under $STACK_DIR."

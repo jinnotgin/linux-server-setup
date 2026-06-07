@@ -603,6 +603,8 @@ keys, and short IDs — only the port differs.
 
   if [[ -d "$STACK_DIR" ]]; then
     ${SUDO:-} chown -R "$TARGET_USER:$TARGET_USER" "$STACK_DIR"
+    ${SUDO:-} chown -R root:root "$SSL_DIR"
+    ${SUDO:-} chmod 0755 "$SSL_DIR"
   fi
 
   echo "Rendered Portainer-ready tunnel compose: $final_compose"

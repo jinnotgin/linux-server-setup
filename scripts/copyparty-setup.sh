@@ -37,6 +37,9 @@ run_copyparty_setup() {
 
   local USER_HOME
   USER_HOME=$(eval echo "~$TARGET_USER")
+  local TARGET_UID TARGET_GID
+  TARGET_UID=$(id -u "$TARGET_USER" 2>/dev/null || id -u)
+  TARGET_GID=$(id -g "$TARGET_USER" 2>/dev/null || id -g)
   STACK_DIR="$USER_HOME/copyparty-stack"
   local copyparty_dir="$STACK_DIR"
   mkdir -p "$copyparty_dir/cfg"
@@ -62,7 +65,10 @@ run_copyparty_setup() {
     COPYPARTY_USER "$COPYPARTY_USER" COPYPARTY_PASS "$COPYPARTY_PASS"
   render_template_file "$TEMPLATE_DIR/copyparty/docker-compose.yml.template" \
     "$copyparty_dir/docker-compose.yml" \
-    COPYPARTY_CFG_PATH "$copyparty_dir/cfg" COPYPARTY_DATA_PATH "$COPYPARTY_DATA_PATH"
+    COPYPARTY_CFG_PATH "$copyparty_dir/cfg" \
+    COPYPARTY_DATA_PATH "$COPYPARTY_DATA_PATH" \
+    COPYPARTY_UID "$TARGET_UID" \
+    COPYPARTY_GID "$TARGET_GID"
 
   printf "Copyparty on 3923\nUser: %s\nPassword: %s\nData dir: %s\n" \
     "$COPYPARTY_USER" "$COPYPARTY_PASS" "$COPYPARTY_DATA_PATH" > "$copyparty_dir/summary.txt"

@@ -23,7 +23,7 @@ configure_locale_timezone() {
     fi
   fi
   $SUDO locale-gen || return 1
-  $SUDO update-locale LANG=en_US.UTF-8 || return 1
+  $SUDO update-locale LANG=en_US.UTF-8 LC_CTYPE=en_US.UTF-8 || return 1
   $SUDO timedatectl set-timezone Asia/Singapore || return 1
 }
 ensure_linux_user() {

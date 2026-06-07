@@ -15,7 +15,14 @@ update_system() {
 configure_locale_timezone() {
   echo "Configuring locale to en_US.UTF-8 and timezone to Asia/Singapore..."
   apt_install_best_effort locales tzdata
-  $SUDO locale-gen en_US.UTF-8 || return 1
+  if [[ -f /etc/locale.gen ]]; then
+    if grep -qE '^# *en_US.UTF-8 UTF-8' /etc/locale.gen; then
+      $SUDO sed -i -E 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen || return 1
+    elif ! grep -qE '^en_US.UTF-8 UTF-8' /etc/locale.gen; then
+      echo 'en_US.UTF-8 UTF-8' | $SUDO tee -a /etc/locale.gen >/dev/null || return 1
+    fi
+  fi
+  $SUDO locale-gen || return 1
   $SUDO update-locale LANG=en_US.UTF-8 || return 1
   $SUDO timedatectl set-timezone Asia/Singapore || return 1
 }
